@@ -67,7 +67,7 @@
               npmDeps = pkgs.importNpmLock.buildNodeModules {
                 package = pkgs.lib.importJSON ./package.json;
                 packageLock = pkgs.lib.importJSON ./package-lock.json;
-                nodejs = pkgs.nodejs_23;
+                nodejs = pkgs.nodejs_24;
               };
               tw-init = pkgs.writeShellScriptBin "tw-init" ''
                 ln -s ${npmDeps}/node_modules node_modules
