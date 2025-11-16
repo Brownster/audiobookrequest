@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import posixpath
 import re
-from typing import Any, Optional
+from typing import Any, Dict, List, cast
 
 from aiohttp import ClientSession
 from sqlmodel import Session
@@ -11,6 +11,20 @@ from sqlmodel import Session
 from app.internal.audiobookshelf.config import abs_config
 from app.internal.models import BookRequest
 from app.util.log import logger
+
+JSONObject = Dict[str, Any]
+JSONArray = List[object]
+JSONValue = JSONObject | JSONArray | str | int | float | bool | None
+
+
+def _as_json_object(value: object) -> JSONObject | None:
+    if isinstance(value, dict) and all(isinstance(k, str) for k in value.keys()):
+        return cast(JSONObject, value)
+    return None
+
+
+def _empty_object() -> JSONObject:
+    return cast(JSONObject, {})
 
 
 def _headers(session: Session) -> dict[str, str]:
@@ -32,9 +46,19 @@ async def abs_get_libraries(
                 "ABS: failed to fetch libraries", status=resp.status, reason=resp.reason
             )
             return []
-        data = await resp.json()
+        data_raw = await resp.json()
+        data_obj = _as_json_object(data_raw)
+        if data_obj is None:
+            return []
         # response shape: { libraries: [...] }
-        libs = data.get("libraries") or []
+        raw_libs = data_obj.get("libraries")
+        if not isinstance(raw_libs, list):
+            return []
+        libs: list[JSONObject] = []
+        for lib in raw_libs:
+            lib_obj = _as_json_object(lib)
+            if lib_obj is not None:
+                libs.append(lib_obj)
         return libs
 
 
@@ -69,28 +93,43 @@ async def _abs_search(session: Session, client_session: ClientSession, q: str) -
         if not resp.ok:
             logger.debug("ABS: search failed", status=resp.status, reason=resp.reason)
             return []
-        data = await resp.json()
+        data_raw = await resp.json()
+        data_obj = _as_json_object(data_raw)
+        if data_obj is None:
+            return []
         # response shape: { results: [ { libraryItem: {...}, media: {...}} ] } in newer ABS
-        items = data.get("results") or data.get("items") or []
+        candidates = data_obj.get("results") or data_obj.get("items")
+        if not isinstance(candidates, list):
+            return []
+        items: list[JSONObject] = []
+        for candidate in candidates:
+            item = _as_json_object(candidate)
+            if item is not None:
+                items.append(item)
         return items
 
 
-def _extract_names(list_or_obj: Any) -> list[str]:
+def _extract_names(list_or_obj: JSONValue) -> list[str]:
     """Best-effort to extract a list of names from various ABS payload shapes."""
     if not list_or_obj:
         return []
-    # Already a list of strings
-    if isinstance(list_or_obj, list) and all(isinstance(x, str) for x in list_or_obj):
-        return list_or_obj
-    # List of objects with name property
-    if isinstance(list_or_obj, list) and all(isinstance(x, dict) for x in list_or_obj):
+    if isinstance(list_or_obj, list):
         names: list[str] = []
-        for x in list_or_obj:
-            n = x.get("name") or x.get("authorName") or x.get("narratorName")
-            if isinstance(n, str):
-                names.append(n)
+        for entry in list_or_obj:
+            if isinstance(entry, str):
+                names.append(entry)
+            else:
+                entry_obj = _as_json_object(entry)
+                if entry_obj is None:
+                    continue
+                n = (
+                    entry_obj.get("name")
+                    or entry_obj.get("authorName")
+                    or entry_obj.get("narratorName")
+                )
+                if isinstance(n, str):
+                    names.append(n)
         return names
-    # Single string
     if isinstance(list_or_obj, str):
         return [list_or_obj]
     return []
@@ -126,14 +165,28 @@ async def abs_list_library_items(
             return []
         payload = await resp.json()
 
-    results = payload.get("results") or payload.get("libraryItems") or []
+    payload_obj = _as_json_object(payload)
+    if payload_obj is None:
+        return []
+    raw_results = payload_obj.get("results") or payload_obj.get("libraryItems")
+    if not isinstance(raw_results, list):
+        return []
+    results: list[JSONObject] = []
+    for raw in raw_results:
+        item = _as_json_object(raw)
+        if item is not None:
+            results.append(item)
 
     books: list[BookRequest] = []
     for item in results:
         try:
             # Try to find media + metadata fields regardless of shape
-            media = item.get("media") or item.get("book") or {}
-            metadata = media.get("metadata") or {}
+            media = (
+                _as_json_object(item.get("media"))
+                or _as_json_object(item.get("book"))
+                or _empty_object()
+            )
+            metadata = _as_json_object(media.get("metadata")) or _empty_object()
 
             title = metadata.get("title") or media.get("title") or item.get("title") or ""
             subtitle = metadata.get("subtitle") or media.get("subtitle")
@@ -221,7 +274,11 @@ async def abs_book_exists(
 
     for it in candidates:
         # ABS search returns different shapes, try best-effort
-        media = it.get("media") or it.get("book") or {}
+        media = (
+            _as_json_object(it.get("media"))
+            or _as_json_object(it.get("book"))
+            or _empty_object()
+        )
         title = media.get("title") or it.get("title") or ""
         authors = media.get("authors") or media.get("authorName") or []
         if isinstance(authors, str):

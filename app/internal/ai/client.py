@@ -1,9 +1,10 @@
 import json
 import time
-from typing import Optional, TypedDict, List, Dict, Any
+from collections import Counter
+from typing import Any, Dict, List, Optional, TypedDict, cast
 
-from aiohttp import ClientSession
-from sqlmodel import Session
+from aiohttp import ClientSession, ClientTimeout
+from sqlmodel import Session, select
 
 from app.internal.ai.config import ai_config
 from app.internal.models import User
@@ -62,31 +63,30 @@ async def fetch_ai_categories(
             return hit[1][:desired_count]
 
     # Build light-weight profile
-    from sqlmodel import select
     from app.internal.models import BookRequest
+
     top_authors: list[str] = []
     top_narrators: list[str] = []
     recent_titles: list[str] = []
     if user is not None:
+        updated_at_column = cast(Any, BookRequest.updated_at)
         reqs = session.exec(
             select(BookRequest)
             .where(BookRequest.user_username == user.username)
-            .order_by(BookRequest.updated_at.desc())
+            .order_by(updated_at_column.desc())
             .limit(50)
         ).all()
-        from collections import Counter
-
-        a = Counter()
-        n = Counter()
+        author_counts: Counter[str] = Counter()
+        narrator_counts: Counter[str] = Counter()
         for r in reqs:
             for au in r.authors or []:
-                a[au] += 1
+                author_counts[au] += 1
             for na in r.narrators or []:
-                n[na] += 1
-            if len(recent_titles) < 10:
+                narrator_counts[na] += 1
+            if len(recent_titles) < 10 and r.title:
                 recent_titles.append(r.title)
-        top_authors = [k for k, _ in a.most_common(8)]
-        top_narrators = [k for k, _ in n.most_common(8)]
+        top_authors = [k for k, _ in author_counts.most_common(8)]
+        top_narrators = [k for k, _ in narrator_counts.most_common(8)]
 
     system_instructions = (
         "You are an assistant that suggests discovery categories for audiobooks. "
@@ -148,82 +148,92 @@ async def fetch_ai_categories(
     url = f"{endpoint}/api/generate"
     logger.info("Requesting AI categories", endpoint=endpoint, model=model, desired_count=desired_count)
     try:
-        async with client_session.post(url, json=body, timeout=30) as resp:
+        timeout = ClientTimeout(total=30)
+        async with client_session.post(url, json=body, timeout=timeout) as resp:
             ctype = resp.headers.get("Content-Type", "")
             if resp.status != 200:
                 logger.info("AI generate returned non-200", status=resp.status, content_type=ctype)
                 return None
 
             # Be robust to wrong content-type: try JSON first without content-type guard
-            parsed_envelope: Any | None = None
+            parsed_envelope: Dict[str, Any] | List[Any] | None = None
             try:
                 parsed_envelope = await resp.json(content_type=None)
             except Exception as je:
                 logger.info("AI response not JSON envelope; reading text", error=str(je), content_type=ctype)
 
             # If we got a JSON envelope with a 'response' field, that's the model text
+            parsed_obj: list[dict[str, Any]] | dict[str, Any] | None = None
             model_text: str | None = None
-            if isinstance(parsed_envelope, dict) and "response" in parsed_envelope:
-                model_text = parsed_envelope.get("response") or ""
-            elif isinstance(parsed_envelope, (list, dict)):
-                # Some models may directly return the desired structure
-                candidate = parsed_envelope
-                if isinstance(candidate, dict):
-                    candidate = [candidate]
-                parsed = candidate  # type: ignore[assignment]
-                # proceed to validation below
-                model_text = None
+            if isinstance(parsed_envelope, dict):
+                if "response" in parsed_envelope:
+                    raw_response: object | None = parsed_envelope.get("response")
+                    if isinstance(raw_response, str):
+                        model_text = raw_response
+                    elif raw_response is None:
+                        model_text = ""
+                    else:
+                        model_text = str(raw_response)
+                else:
+                    parsed_obj = [parsed_envelope]
+            elif isinstance(parsed_envelope, list):
+                parsed_obj = [p for p in parsed_envelope if isinstance(p, dict)]
             else:
                 # Fallback to text and parse JSON from it
-                text_raw = await resp.text()
-                model_text = text_raw
+                model_text = await resp.text()
 
-            parsed: Any | None = None
             if model_text is not None:
-                if not model_text.strip():
+                stripped = model_text.strip()
+                if not stripped:
                     logger.info("AI generate returned empty response body")
                     return None
                 try:
-                    parsed = json.loads(model_text)
+                    parsed_obj = json.loads(stripped)
                 except json.JSONDecodeError:
                     # Attempt to extract array or object from raw text
-                    start_arr = model_text.find("[")
-                    end_arr = model_text.rfind("]")
-                    start_obj = model_text.find("{")
-                    end_obj = model_text.rfind("}")
+                    start_arr = stripped.find("[")
+                    end_arr = stripped.rfind("]")
+                    start_obj = stripped.find("{")
+                    end_obj = stripped.rfind("}")
                     if start_arr != -1 and end_arr != -1 and end_arr > start_arr:
-                        parsed = json.loads(model_text[start_arr : end_arr + 1])
+                        parsed_obj = json.loads(stripped[start_arr : end_arr + 1])
                     elif start_obj != -1 and end_obj != -1 and end_obj > start_obj:
-                        parsed = json.loads(model_text[start_obj : end_obj + 1])
+                        parsed_obj = json.loads(stripped[start_obj : end_obj + 1])
                     else:
                         logger.info("AI response did not contain JSON payload")
                         return None
 
-            if isinstance(parsed, dict):
-                parsed = [parsed]
-            if not isinstance(parsed, list):
+            items_raw: list[dict[str, Any]]
+            if isinstance(parsed_obj, dict):
+                items_raw = [parsed_obj]
+            elif isinstance(parsed_obj, list):
+                items_raw = list(parsed_obj)
+            else:
                 logger.info("AI response JSON not a list; ignoring")
                 return None
             categories: List[AICategory] = []
-            for item in parsed:
-                if not isinstance(item, dict):
-                    continue
+            for item in items_raw:
                 title = item.get("title")
-                terms = item.get("search_terms")
-                if not title or not isinstance(terms, list) or not all(isinstance(t, str) for t in terms):
+                if not isinstance(title, str) or not title:
                     continue
-                desc = item.get("description") or ""
-                reasoning = item.get("reasoning") or ""
-                terms = [t.strip() for t in terms if isinstance(t, str)]
+                terms_raw = item.get("search_terms")
+                if not isinstance(terms_raw, list):
+                    continue
+                terms_list = cast(List[Any], terms_raw)
+                terms = [t.strip() for t in terms_list if isinstance(t, str)]
                 terms = [t for t in terms if t]
                 if not terms:
                     continue
+                desc_value = item.get("description")
+                reasoning_value = item.get("reasoning")
+                desc_str = str(desc_value) if isinstance(desc_value, str) else ""
+                reasoning_str = str(reasoning_value) if isinstance(reasoning_value, str) else ""
                 categories.append(
                     {
                         "title": str(title)[:64],
-                        "description": str(desc)[:200],
+                        "description": desc_str[:200],
                         "search_terms": terms[:8],
-                        "reasoning": str(reasoning)[:200],
+                        "reasoning": reasoning_str[:200],
                     }
                 )
             if not categories:
@@ -241,7 +251,7 @@ async def fetch_ai_category(
     session: Session,
     client_session: ClientSession,
     user: Optional[User] = None,
-) -> Optional[dict]:
+) -> Optional[AICategory]:
     """
     Ask the configured Ollama model for a single recommended category
     tailored to the current user and return a JSON dict:
@@ -259,7 +269,12 @@ async def fetch_ai_category(
     if not cats:
         return None
     cat = cats[0]
-    return {"title": cat.get("title", "AI Picks"), "description": cat.get("description", ""), "search_terms": cat.get("search_terms", [])}
+    return {
+        "title": str(cat.get("title") or "AI Picks"),
+        "description": str(cat.get("description") or ""),
+        "search_terms": cat.get("search_terms", []),
+        "reasoning": str(cat.get("reasoning") or ""),
+    }
 
 
 class AIBookRec(TypedDict, total=False):
@@ -305,14 +320,14 @@ async def fetch_ai_book_recommendations(
             return hit[1][:desired_count]
 
     # Build small seed list of recent user requests
-    from sqlmodel import select
     from app.internal.models import BookRequest
     seeds: list[dict[str, str]] = []
     if user is not None:
+        updated_at_column = cast(Any, BookRequest.updated_at)
         reqs = session.exec(
             select(BookRequest)
             .where(BookRequest.user_username == user.username)
-            .order_by(BookRequest.updated_at.desc())
+            .order_by(updated_at_column.desc())
             .limit(20)
         ).all()
         seen: set[str] = set()
@@ -375,66 +390,80 @@ async def fetch_ai_book_recommendations(
 
     url = f"{endpoint}/api/generate"
     try:
-        async with client_session.post(url, json=body, timeout=40) as resp:
+        timeout = ClientTimeout(total=40)
+        async with client_session.post(url, json=body, timeout=timeout) as resp:
             ctype = resp.headers.get("Content-Type", "")
             if resp.status != 200:
                 logger.info("AI book recs returned non-200", status=resp.status, content_type=ctype)
                 return None
-            envelope: Any | None = None
+            envelope: Dict[str, Any] | List[Any] | None = None
             try:
                 envelope = await resp.json(content_type=None)
             except Exception:
                 envelope = None
+            parsed_obj: list[dict[str, Any]] | dict[str, Any] | None = None
             text: str | None = None
-            if isinstance(envelope, dict) and "response" in envelope:
-                text = envelope.get("response") or ""
-            elif isinstance(envelope, (dict, list)):
-                parsed = envelope
-                text = None
+            if isinstance(envelope, dict):
+                if "response" in envelope:
+                    raw_resp: object | None = envelope.get("response")
+                    if isinstance(raw_resp, str):
+                        text = raw_resp
+                    elif raw_resp is None:
+                        text = ""
+                    else:
+                        text = str(raw_resp)
+                else:
+                    parsed_obj = [envelope]
+            elif isinstance(envelope, list):
+                parsed_obj = [p for p in envelope if isinstance(p, dict)]
             else:
                 text = await resp.text()
 
             if text is not None:
-                if not text.strip():
+                stripped = text.strip()
+                if not stripped:
                     return None
                 try:
-                    parsed = json.loads(text)
+                    parsed_obj = json.loads(stripped)
                 except json.JSONDecodeError:
-                    s1, e1 = text.find("["), text.rfind("]")
-                    s2, e2 = text.find("{"), text.rfind("}")
+                    s1, e1 = stripped.find("["), stripped.rfind("]")
+                    s2, e2 = stripped.find("{"), stripped.rfind("}")
                     if s1 != -1 and e1 != -1 and e1 > s1:
-                        parsed = json.loads(text[s1 : e1 + 1])
+                        parsed_obj = json.loads(stripped[s1 : e1 + 1])
                     elif s2 != -1 and e2 != -1 and e2 > s2:
-                        parsed = json.loads(text[s2 : e2 + 1])
+                        parsed_obj = json.loads(stripped[s2 : e2 + 1])
                     else:
                         return None
 
-            if isinstance(parsed, dict):
-                parsed = [parsed]
-            if not isinstance(parsed, list):
+            parsed_list: list[dict[str, Any]]
+            if isinstance(parsed_obj, dict):
+                parsed_list = [parsed_obj]
+            elif isinstance(parsed_obj, list):
+                parsed_list = list(parsed_obj)
+            else:
                 return None
             items: List[AIBookRec] = []
-            for it in parsed:
-                if not isinstance(it, dict):
-                    continue
+            for it in parsed_list:
                 title = it.get("title")
                 author = it.get("author")
-                seed_title = it.get("seed_title") or ""
-                seed_author = it.get("seed_author") or ""
-                if not title or not author:
+                if not isinstance(title, str) or not isinstance(author, str):
                     continue
-                reasoning = it.get("reasoning") or ""
-                terms = it.get("search_terms") or []
-                if not isinstance(terms, list):
-                    terms = []
+                seed_title_raw = it.get("seed_title")
+                seed_author_raw = it.get("seed_author")
+                reasoning_raw = it.get("reasoning")
+                terms_raw = it.get("search_terms")
+                terms_clean: list[str] = []
+                if isinstance(terms_raw, list):
+                    terms_list = cast(List[Any], terms_raw)
+                    terms_clean = [str(t)[:100] for t in terms_list if isinstance(t, str)]
                 items.append(
                     {
-                        "seed_title": str(seed_title)[:128],
-                        "seed_author": str(seed_author)[:128],
+                        "seed_title": str(seed_title_raw or "")[:128],
+                        "seed_author": str(seed_author_raw or "")[:128],
                         "title": str(title)[:128],
                         "author": str(author)[:128],
-                        "reasoning": str(reasoning)[:200],
-                        "search_terms": [str(t)[:100] for t in terms if isinstance(t, str)][:5],
+                        "reasoning": str(reasoning_raw or "")[:200],
+                        "search_terms": terms_clean[:5],
                     }
                 )
             if not items:
