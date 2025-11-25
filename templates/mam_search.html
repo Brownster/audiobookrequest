@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block head %}
+  <title>MAM Search</title>
+  <script>
+  const onSearch = () => {
+    const search_term = document.querySelector("input").value;
+    const requestIdEl = document.querySelector('input[name="request_id"]');
+    document.getElementById("search").disabled = true;
+    document.getElementById("search-text").style.display = "none";
+    document.getElementById("search-spinner").style.display = "inline-block";
+    let url = `/search/mam?q=${encodeURIComponent(search_term)}`;
+    if (requestIdEl && requestIdEl.value) {
+      url += `&request_id=${encodeURIComponent(requestIdEl.value)}`;
+    }
+    window.location.href = url;
+    return false;
+  };
+  </script>
+{% endblock head %}
+{% block body %}
+  <div class="w-screen flex flex-col items-center justify-center p-6 sm:p-8 overflow-x-hidden gap-4">
+    <div class="flex w-full justify-between items-center">
+      <h1 class="text-3xl font-bold text-left">MAM Search</h1>
+      <a href="{{ base_url }}/search" class="btn btn-ghost">Back to Audible Search</a>
+    </div>
+    {% if error %}
+      <div class="alert alert-error w-full max-w-6xl">
+        <span class="stroke-info h-6 w-6 shrink-0">{% include "icons/info-circle.html" %}</span>
+        <div>
+          <div class="font-semibold">Could not search MAM</div>
+          <div class="text-sm">{{ error }}</div>
+        </div>
+      </div>
+    {% endif %}
+    {% if not request_id %}
+      <div class="alert alert-warning w-full max-w-6xl">
+        <span>No request selected. Results can be viewed, but downloads need to be started from a request page so they stay linked.</span>
+      </div>
+    {% endif %}
+    <div class="flex flex-col gap-4 justify-start items-center w-full max-w-6xl">
+      <form class="flex items-start w-full join" onsubmit="onSearch(); return false;">
+        <input name="q"
+               class="input join-item focus:z-10 w-full"
+               placeholder="Search MAM..."
+               value="{{ search_term }}"
+               autofocus />
+        <input type="hidden" name="request_id" value="{{ request_id }}">
+        <button id="search" class="btn btn-primary join-item" type="submit">
+          <span id="search-text">Search</span>
+          <span id="search-spinner" class="loading hidden"></span>
+        </button>
+      </form>
+
+      {% if search_results %}
+        <div class="overflow-x-auto w-full">
+          <div class="text-sm opacity-70 mb-2">Search Results</div>
+          <div class="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+            {% for result in search_results %}
+              <div class="flex flex-col">
+                <div class="relative w-[8rem] h-[8rem] sm:w-[10rem] sm:h-[10rem] rounded-md overflow-hidden shadow shadow-black items-center justify-center flex">
+                  {% if result.cover_image %}
+                    <img class="object-cover w-full h-full hover:scale-110 transition-transform duration-500 ease-in-out"
+                         height="128"
+                         width="128"
+                         src="{{ result.cover_image }}"
+                         alt="{{ result.title }}" />
+                  {% else %}
+                    {% include "icons/photo-off.html" %}
+                  {% endif %}
+                  <span class="absolute left-1 top-1 badge badge-sm">MAM</span>
+                  <button class="absolute top-0 right-0 rounded-none rounded-bl-md btn-sm btn btn-square items-center justify-center flex btn-info"
+                          {% if not request_id %}disabled{% endif %}
+                          hx-post="{{ base_url }}/search/mam/download"
+                          hx-vals='{"torrent_id": "{{ result.source.raw.id }}", "title": {{ result.title | tojson }}{% if request_id %}, "request_id": "{{ request_id }}"{% endif %}}'
+                          hx-swap="outerHTML">
+                    {% include "icons/download.html" %}
+                  </button>
+                </div>
+                <div class="text-sm text-primary font-bold pt-1 line-clamp-2">{{ result.title }}</div>
+                <div class="text-xs font-semibold line-clamp-1" title="Authors">
+                  {{ result.authors | join(', ') }}
+                </div>
+                <div class="text-[0.7rem] flex flex-wrap gap-1 opacity-70">
+                  <span>S: {{ result.seeders }}</span>
+                  <span>F: {{ 'yes' if 'freeleech' in result.flags else 'no' }}</span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% elif search_term %}
+        <div class="text-center p-8">
+            <span class="text-xl font-semibold">No results found on MAM</span>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock body %}

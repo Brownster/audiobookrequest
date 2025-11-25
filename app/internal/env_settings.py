@@ -27,6 +27,8 @@ class ApplicationSettings(BaseModel):
     version: str = "local"
     log_level: str = "INFO"
     base_url: str = ""
+    download_dir: str = "/tmp/abr/audiobooks"
+    """Where finished audiobooks are written after post-processing."""
 
     default_region: str = "us"
     """Default region used in the search"""

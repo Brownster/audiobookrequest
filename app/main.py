@@ -17,7 +17,7 @@ from app.internal.auth.session_middleware import (
 from app.internal.book_search import clear_old_book_caches
 from app.internal.env_settings import Settings
 from app.internal.models import User
-from app.routers import api, auth, root, search, settings, wishlist
+from app.routers import api, auth, root, search, settings, wishlist, downloads
 from app.util.db import open_session
 from app.util.fetch_js import fetch_scripts
 from app.util.redirect import BaseUrlRedirectResponse
@@ -33,6 +33,18 @@ with open_session() as session:
     clear_old_book_caches(session)
 
 
+from contextlib import asynccontextmanager
+from app.internal.services.download_manager import DownloadManager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    await DownloadManager.get_instance().start()
+    yield
+    # Shutdown
+    await DownloadManager.get_instance().stop()
+
+
 app = FastAPI(
     title="AudioBookRequest",
     debug=Settings().app.debug,
@@ -44,6 +56,7 @@ app = FastAPI(
     ],
     root_path=Settings().app.base_url.rstrip("/"),
     redirect_slashes=False,
+    lifespan=lifespan,
 )
 
 app.include_router(auth.router, include_in_schema=False)
@@ -51,6 +64,7 @@ app.include_router(root.router, include_in_schema=False)
 app.include_router(search.router, include_in_schema=False)
 app.include_router(settings.router, include_in_schema=False)
 app.include_router(wishlist.router, include_in_schema=False)
+app.include_router(downloads.router, include_in_schema=False)
 # api router under /api
 app.include_router(api.router)
 

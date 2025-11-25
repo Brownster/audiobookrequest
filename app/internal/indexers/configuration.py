@@ -87,6 +87,9 @@ def create_valued_configuration(
         config_value = indexer_configuration_cache.get(session, key)
         if config_value is None:
             config_value = value.default
+        # Treat empty strings the same as None to avoid type conversion errors and allow defaults
+        if isinstance(config_value, str) and config_value.strip() == "":
+            config_value = None
 
         if check_required and value.required and config_value is None:
             raise MissingRequiredException(f"Configuration {key} is required")

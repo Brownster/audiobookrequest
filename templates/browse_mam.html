@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block head %}
+<title>Browse MAM</title>
+<script>
+  const onBrowseSearch = () => {
+    const term = document.querySelector('input[name="q"]').value;
+    const category = document.querySelector('select[name="category"]').value;
+    const params = new URLSearchParams(window.location.search);
+
+    if (term) {
+      params.set("q", term);
+    } else {
+      params.delete("q");
+    }
+
+    if (category) {
+      params.set("category", category);
+    } else {
+      params.delete("category");
+    }
+
+    window.location.href = `/browse/mam?${params.toString()}`;
+    return false;
+  };
+</script>
+{% endblock head %}
+{% block body %}
+<div class="w-screen flex flex-col items-center justify-center p-6 sm:p-8 overflow-x-hidden gap-4">
+    <div class="flex w-full justify-between items-center">
+      <h1 class="text-3xl font-bold text-left">MyAnonamouse Browse</h1>
+      <a href="{{ base_url }}/search" class="btn btn-ghost">Back to Audible Search</a>
+    </div>
+
+  {% if error %}
+  <div class="alert alert-error w-full max-w-6xl">
+    <span>{% include "icons/info-circle.html" %}</span>
+    <div>
+      <div class="font-semibold">Cannot browse MAM</div>
+      <div class="text-sm">{{ error }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not request_id %}
+  <div class="alert alert-warning w-full max-w-6xl">
+    <span>{% include "icons/info-circle.html" %}</span>
+    <div>
+      <div class="font-semibold">No request selected</div>
+      <div class="text-sm">Downloads need to start from a request so they stay linked.</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="flex flex-col gap-4 justify-start items-center w-full max-w-6xl">
+    <form class="flex items-start w-full join" onsubmit="return onBrowseSearch();">
+      <select name="category" class="select select-bordered join-item focus:z-10">
+        <option value="" {% if not selected_category %}selected{% endif %}>All Categories</option>
+        {% for cat in categories %}
+        <option value="{{ cat.tracker_id }}" {% if selected_category==cat.tracker_id %}selected{% endif %}>{{ cat.name
+          }}</option>
+        {% endfor %}
+      </select>
+      <input name="q" class="input join-item focus:z-10 w-full"
+        placeholder="Try a broad term (e.g. 'the', 'a', author)..." value="{{ search_term }}" autofocus />
+      <input type="hidden" name="request_id" value="{{ request_id }}">
+      <button class="btn btn-primary join-item" type="submit">
+        <span>Refresh</span>
+      </button>
+    </form>
+
+    {% macro result_card(result) -%}
+    <div class="flex flex-col">
+      <div
+        class="relative w-[8rem] h-[8rem] sm:w-[10rem] sm:h-[10rem] rounded-md overflow-hidden shadow shadow-black items-center justify-center flex">
+        {% if result.cover_image %}
+        <img class="object-cover w-full h-full hover:scale-110 transition-transform duration-500 ease-in-out"
+          height="128" width="128" src="{{ result.cover_image }}" alt="{{ result.title }}" />
+        {% else %}
+        {% include "icons/photo-off.html" %}
+        {% endif %}
+        <span class="absolute left-1 top-1 badge badge-sm">MAM</span>
+        <button
+          class="absolute top-0 right-0 rounded-none rounded-bl-md btn-sm btn btn-square items-center justify-center flex btn-info"
+          {% if not request_id %}disabled{% endif %} hx-post="{{ base_url }}/search/mam/download"
+          hx-vals='{"torrent_id": "{{ result.source.raw.id }}", "title": "{{ result.title | toJSstring }}"{% if request_id %}, "request_id": "{{ request_id }}"{% endif %}}'
+          hx-swap="outerHTML">
+          {% include "icons/download.html" %}
+        </button>
+      </div>
+      <div class="text-sm text-primary font-bold pt-1 line-clamp-2">{{ result.title }}</div>
+      <div class="text-xs font-semibold line-clamp-1" title="Authors">
+        {{ result.authors | join(', ') }}
+      </div>
+      <div class="text-[0.7rem] flex flex-wrap gap-1 opacity-70">
+        <span>Seeders: {{ result.seeders }}</span>
+        <span>Freeleech: {{ 'yes' if 'freeleech' in result.flags else 'no' }}</span>
+      </div>
+    </div>
+    {%- endmacro %}
+
+    {% for key, label, blurb in [
+    ('popular', 'Popular right now', 'Highest seeders'),
+    ('new', 'New on MAM', 'Recently added'),
+    ('freeleech', 'Freeleech Picks', 'Free/freeleech flagged')
+    ] %}
+    <div class="w-full space-y-2">
+      <div class="flex justify-between items-center">
+        <div>
+          <div class="text-lg font-bold">{{ label }}</div>
+          <div class="text-sm opacity-70">{{ blurb }}</div>
+        </div>
+      </div>
+      {% if sections[key] %}
+      <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        {% for result in sections[key] %}
+        {{ result_card(result) }}
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-sm opacity-70">No results yet.</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock body %}

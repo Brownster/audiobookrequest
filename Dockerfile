@@ -75,11 +75,4 @@ ENV ABR_APP__PORT=8000
 ARG VERSION
 ENV ABR_APP__VERSION=$VERSION
 
-#CMD /app/.venv/bin/alembic upgrade heads && /app/.venv/bin/fastapi run --port $ABR_APP__PORT
-CMD /app/.venv/bin/alembic upgrade heads && \
-    /app/.venv/bin/uvicorn app.main:app \
-        --host 0.0.0.0 \
-        --port $ABR_APP__PORT \
-        --workers 1 \
-        --log-level debug
-
+CMD ["/bin/sh", "-c", "/app/.venv/bin/alembic upgrade heads && /app/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${ABR_APP__PORT:-8000} --workers 1 --log-level debug"]

@@ -44,6 +44,8 @@ It is not intended as a full replacement for Readarr/Chaptarr, but instead inten
 - Add manual audiobook requests for any books not available on Audible.
 - Easy user management. Only three assignable groups, made to get out of your way.
 - Automatic downloading of requests. Integrate Prowlarr to use all your existing indexer settings and download clients.
+- Native MyAnonamouse (MAM) search + download to qBittorrent/Transmission, with automatic post-processing (merge/tag) into your Audiobookshelf library.
+- Download pipeline tracker to see each job from MAM → qBittorrent → post-processing.
 - Send notifications to your favorite notification service (apprise, gotify, discord, ntfy, etc.).
 - Single image deployment. You can deploy and create your first requests in under 5 minutes.
 - SQLite and Postgres support!
@@ -90,6 +92,16 @@ Auto-downloading enables requests by `Trusted` and `Admin` users to directly sta
    1. Enable `Auto Download` at the top.
    2. The remaining heuristics determine the ranking of any sources retrieved from Prowlarr.
    3. Indexer flags allow you to add priorities to certain sources like freeleeches.
+
+### MAM + qBittorrent + seedbox (Audiobookshelf pipeline)
+
+ABR can search MyAnonamouse, send torrents to qBittorrent/Transmission, post-process (merge/tag), and drop finished audiobooks into your ABS library.
+
+Quick setup:
+1. Settings ▸ MAM: enter your `mam_id` cookie, choose download client `qBittorrent`, and fill URL/user/pass. Enable SSL if your WebUI is HTTPS.
+2. Path mapping (for remote seedboxes): set `qB Remote Download Path` to the path qB reports (e.g. `/` if FTP drops you into the download root), and `qB Local Path Prefix` to the local mount (e.g. `/home/marc/audiobookdownloads`).
+3. Destination: set env `ABR_APP__DOWNLOAD_DIR=/mnt/storage/audiobooks` (ABS watch/library path) and restart ABR.
+4. Browse/Search ▸ MAM: click the `+` to queue; watch progress at `/downloads` (MAM → qB → post-process). Wishlist items can auto-download via MAM; if unavailable, they stay on the wishlist marked “Waiting on MAM” and are retried every 3 days.
 
 ### Audiobookshelf Integration
 
@@ -141,6 +153,7 @@ In the case of an OIDC misconfiguration, i.e. changing a setting like your clien
 | `ABR_APP__CONFIG_DIR`         | The directory path where persistant data and configuration is stored. If ran using Docker or Kubernetes, this is the location a volume should be mounted to.                                                                                                 | /config          |
 | `ABR_APP__LOG_LEVEL`          | One of `DEBUG`, `INFO`, `WARN`, `ERROR`.                                                                                                                                                                                                                     | INFO             |
 | `ABR_APP__BASE_URL`           | Defines the base url the website is hosted at. If the website is accessed at `example.org/abr/`, set the base URL to `/abr/`                                                                                                                                 |                  |
+| `ABR_APP__DOWNLOAD_DIR`       | Destination path for finished audiobooks after post-processing (point this at your Audiobookshelf watch/library folder).                                                                                                                                    | /tmp/abr/audiobooks |
 | `ABR_DB__SQLITE_PATH`         | If relative, path and name of the sqlite database in relation to `ABR_APP__CONFIG_DIR`. If absolute (path starts with `/`), the config dir is ignored and only the absolute path is used.                                                                    | db.sqlite        |
 | `ABR_APP__DEFAULT_REGION`     | Default audible region to use for the search. Has to be one of `us, ca, uk, au, fr, de, jp, it, in, es, br`.                                                                                                                                                 | us               |
 | `ABR_APP__FORCE_LOGIN_TYPE`   | Forces the login type and prevents it from being modified. Can be one of `basic`, `forms`, `oidc`, or `none` to disable the login. `oidc` requires both the `ABR_APP__INIT_ROOT_USERNAME` and `ABR_APP__INIT_ROOT_PASSWORD` environment variables to be set. |                  |
@@ -227,11 +240,18 @@ browser-sync http://localhost:8000 --files templates/** --files app/**
 
 ## Docker Compose
 
-The docker compose can also be used to run the app locally:
+The docker compose can also be used to run the app locally with Postgres and optional Gotify:
 
 ```bash
 docker compose --profile local up --build
 ```
+
+Key points:
+- Web UI: http://localhost:8012 (mapped from container 8000).
+- Data/config: mounted at `./config` -> `/config` in the container.
+- Database: Postgres service `psql` preconfigured via env vars (user `abr`/`password`, db `audiobookrequest`).
+- Migrations run automatically on start; no extra steps needed.
+- Configure MyAnonamouse in-app under `Settings > MAM` (session ID, client, seeding targets).
 
 # Docs
 

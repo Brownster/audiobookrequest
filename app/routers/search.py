@@ -1,5 +1,7 @@
 import uuid
+from datetime import datetime
 from typing import Annotated, Optional
+from urllib.parse import quote_plus
 
 from aiohttp import ClientSession
 from fastapi import (
@@ -8,9 +10,11 @@ from fastapi import (
     Depends,
     Form,
     HTTPException,
+    Response,
     Query,
     Request,
     Security,
+    status,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
@@ -45,6 +49,17 @@ from app.util.connection import get_connection
 from app.util.db import get_session, open_session
 from app.util.recommendations import get_homepage_recommendations
 from app.util.templates import template_response
+from app.internal.clients.mam import MyAnonamouseClient, MamClientSettings
+from app.internal.services.download_manager import DownloadManager
+from app.internal.models import DownloadJob, DownloadJobStatus
+from app.internal.env_settings import Settings
+from app.internal.indexers.configuration import indexer_configuration_cache
+from app.util.log import logger
+from app.util.redirect import BaseUrlRedirectResponse
+from app.internal.audiobookshelf.config import abs_config
+from app.internal.audiobookshelf.client import abs_book_exists
+from app.internal.mam_normalizer import normalize_mam_results
+from app.internal.clients.mam_categories import CATEGORY_MAPPINGS
 
 router = APIRouter(prefix="/search")
 
@@ -176,6 +191,48 @@ async def add_request(
     book = await get_book_by_asin(client_session, asin, region)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
+
+    # Check if already requested by anyone
+    existing_any = session.exec(
+        select(BookRequest).where(
+            BookRequest.asin == asin,
+            col(BookRequest.user_username).is_not(None),
+        )
+    ).first()
+    if existing_any:
+        # If downloaded or has active job, short-circuit with toast
+        if existing_any.downloaded:
+            return template_response(
+                "base.html",
+                request,
+                user,
+                {"toast_info": "Already in requests/downloaded."},
+                block_name="toast_block",
+                headers={"HX-Retarget": "#toast-block"},
+            )
+        # Avoid duplicate request rows
+        return template_response(
+            "base.html",
+            request,
+            user,
+            {"toast_info": "Already requested; check wishlist."},
+            block_name="toast_block",
+            headers={"HX-Retarget": "#toast-block"},
+        )
+
+    # Check if already in Audiobookshelf
+    try:
+        if abs_config.is_valid(session) and await abs_book_exists(session, client_session, book):
+            return template_response(
+                "base.html",
+                request,
+                user,
+                {"toast_info": "Already in your library (Audiobookshelf)."},
+                block_name="toast_block",
+                headers={"HX-Retarget": "#toast-block"},
+            )
+    except Exception as e:
+        logger.debug("ABS check skipped", error=str(e))
 
     book.user_username = user.username
     try:
@@ -357,4 +414,336 @@ async def add_manual(
         user,
         {"success": "Successfully added request", "auto_download": auto_download},
         block_name="form",
+    )
+
+
+@router.post("/request/{asin}/mam")
+async def add_request_and_open_mam(
+    request: Request,
+    asin: str,
+    session: Annotated[Session, Depends(get_session)],
+    client_session: Annotated[ClientSession, Depends(get_connection)],
+    region: Annotated[audible_region_type, Form()] = get_region_from_settings(),
+    user: DetailedUser = Security(ABRAuth()),
+):
+    """Create (or reuse) a BookRequest and redirect to MAM search with request_id."""
+    if audible_regions.get(region) is None:
+        raise HTTPException(status_code=400, detail="Invalid region")
+
+    def _redirect_with_hx(url: str):
+        base = BaseUrlRedirectResponse(url)
+        target = base.headers.get("location", url)
+        # HTMX drops redirect headers after following 3xx; send HX-Redirect directly.
+        return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"HX-Redirect": target})
+
+    existing_request = session.exec(
+        select(BookRequest).where(
+            BookRequest.asin == asin, BookRequest.user_username == user.username
+        )
+    ).first()
+
+    # If any user already requested this ASIN, reuse that to avoid duplicates
+    any_request = existing_request or session.exec(
+        select(BookRequest).where(
+            BookRequest.asin == asin, col(BookRequest.user_username).is_not(None)
+        )
+    ).first()
+    if any_request:
+        return _redirect_with_hx(
+            f"/search/mam?q={quote_plus(any_request.title)}&request_id={any_request.id}"
+        )
+
+    book_request = existing_request
+    if not existing_request:
+        book = await get_book_by_asin(client_session, asin, region)
+        if not book:
+            raise HTTPException(status_code=404, detail="Book not found")
+
+        # If any user already requested this ASIN, reuse to avoid duplicates
+        any_request = session.exec(
+            select(BookRequest).where(
+                BookRequest.asin == asin, col(BookRequest.user_username).is_not(None)
+            )
+        ).first()
+        if any_request:
+            return _redirect_with_hx(
+                f"/search/mam?q={quote_plus(any_request.title)}&request_id={any_request.id}"
+            )
+
+        # Check if already in Audiobookshelf
+        try:
+            if abs_config.is_valid(session) and await abs_book_exists(session, client_session, book):
+                return _redirect_with_hx(f"/search?q={quote_plus(book.title)}")
+        except Exception as e:
+            logger.debug("ABS check skipped", error=str(e))
+
+        book.user_username = user.username
+        try:
+            session.add(book)
+            session.commit()
+            book_request = book
+        except IntegrityError:
+            session.rollback()
+            book_request = session.exec(
+                select(BookRequest).where(
+                    BookRequest.asin == asin, BookRequest.user_username == user.username
+                )
+            ).first()
+
+    if not book_request:
+        raise HTTPException(status_code=500, detail="Failed to create request")
+
+    return _redirect_with_hx(
+        f"/search/mam?q={quote_plus(book_request.title)}&request_id={book_request.id}"
+    )
+
+
+@router.get("/mam")
+async def read_mam_search(
+    request: Request,
+    client_session: Annotated[ClientSession, Depends(get_connection)],
+    session: Annotated[Session, Depends(get_session)],
+    query: Annotated[Optional[str], Query(alias="q")] = None,
+    request_id: Annotated[Optional[uuid.UUID], Query()] = None,
+    args: Annotated[list[str], Query()] = [],
+    user: DetailedUser = Security(ABRAuth()),
+):
+    results = []
+    if query:
+        mam_session_id = indexer_configuration_cache.get(session, "MyAnonamouse_mam_session_id")
+        
+        # Check for mock override
+        use_mock = False
+        if request.query_params.get("mock") == "1":
+             use_mock = True
+             if not mam_session_id:
+                 mam_session_id = "mock_session_id"
+
+        if not mam_session_id:
+             return template_response(
+                "mam_search.html",
+                request,
+                user,
+                {
+                    "search_term": query or "",
+                    "search_results": [],
+                    "error": "MAM Session ID not configured."
+                },
+            )
+
+        settings = MamClientSettings(
+             mam_session_id=mam_session_id,
+             use_mock_data=use_mock
+        )
+        
+        client = MyAnonamouseClient(client_session, settings)
+        try:
+            raw_results = await client.search(query)
+            results = normalize_mam_results(raw_results)
+        except Exception as e:
+            logger.error("MAM search failed", error=str(e))
+            return template_response(
+                "mam_search.html",
+                request,
+                user,
+                {
+                    "search_term": query or "",
+                    "search_results": [],
+                    "error": f"Search failed: {e}"
+                },
+            )
+
+    return template_response(
+        "mam_search.html",
+        request,
+        user,
+        {
+            "search_term": query or "",
+            "search_results": results,
+            "request_id": request_id,
+        },
+    )
+
+
+@router.post("/mam/download")
+async def download_mam(
+    request: Request,
+    torrent_id: Annotated[str, Form()],
+    title: Annotated[str, Form()],
+    session: Annotated[Session, Depends(get_session)],
+    user: DetailedUser = Security(ABRAuth()),
+    request_id: Annotated[str | None, Form()] = None,
+):
+    if not request_id:
+        return template_response(
+            "base.html",
+            request,
+            user,
+            {"toast_error": "Missing request id; open MAM search from a request page."},
+            block_name="toast_block",
+            headers={"HX-Retarget": "#toast-block"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        request_uuid = uuid.UUID(request_id)
+    except ValueError:
+        return template_response(
+            "base.html",
+            request,
+            user,
+            {"toast_error": "Invalid request id"},
+            block_name="toast_block",
+            headers={"HX-Retarget": "#toast-block"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    book_request = session.get(BookRequest, request_uuid)
+    if not book_request:
+        return template_response(
+            "base.html",
+            request,
+            user,
+            {"toast_error": "Request not found"},
+            block_name="toast_block",
+            headers={"HX-Retarget": "#toast-block"},
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Prevent duplicate jobs for the same request/torrent in active states
+    existing_job = session.exec(
+        select(DownloadJob).where(
+            DownloadJob.request_id == book_request.id,
+            DownloadJob.torrent_id == torrent_id,
+            DownloadJob.status.in_(
+                [
+                    DownloadJobStatus.pending,
+                    DownloadJobStatus.downloading,
+                    DownloadJobStatus.seeding,
+                    DownloadJobStatus.processing,
+                ]
+            ),
+        )
+    ).first()
+    if existing_job:
+        return template_response(
+            "base.html",
+            request,
+            user,
+            {"toast_info": "Already queued/downloading."},
+            block_name="toast_block",
+            headers={"HX-Retarget": "#toast-block"},
+        )
+
+    # Create DownloadJob
+    job = DownloadJob(
+        request_id=book_request.id,
+        title=title,
+        torrent_id=torrent_id,
+        status=DownloadJobStatus.pending,
+        message="Queued for download"
+    )
+    session.add(job)
+    session.commit()
+    
+    # Submit to DownloadManager
+    await DownloadManager.get_instance().submit_job(str(job.id))
+    
+    return template_response(
+        "base.html", # Just return a button or success message
+        request,
+        user,
+        {"toast_success": "Download queued"},
+        block_name="toast_block",
+        headers={"HX-Retarget": "#toast-block"}
+    )
+
+
+def _parse_publish_date(date_str: str | None):
+    if not date_str:
+        return None
+    try:
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _build_mam_sections(results: list, limit: int = 15):
+    def is_free(r):
+        flags = getattr(r, "flags", []) or []
+        return any(f in {"free", "freeleech", "personal_freeleech"} for f in flags)
+
+    def sort_date(r):
+        dt = _parse_publish_date(getattr(r, "publish_date", None))
+        return dt or datetime.min
+
+    new = sorted(results, key=sort_date, reverse=True)[:limit]
+    popular = sorted(results, key=lambda r: getattr(r, "seeders", 0), reverse=True)[:limit]
+    freeleech = [r for r in results if is_free(r)][:limit]
+    return {"new": new, "popular": popular, "freeleech": freeleech}
+
+
+@router.get("/browse/mam")
+async def browse_mam(
+    request: Request,
+    client_session: Annotated[ClientSession, Depends(get_connection)],
+    session: Annotated[Session, Depends(get_session)],
+    request_id: Annotated[Optional[str], Query()] = None,
+    q: Annotated[Optional[str], Query()] = None,
+    args: Annotated[list[str], Query()] = [],
+    category: Annotated[Optional[int], Query()] = None,
+    user: DetailedUser = Security(ABRAuth()),
+):
+    mam_session_id = indexer_configuration_cache.get(session, "MyAnonamouse_mam_session_id")
+    
+    # Allow optional mock mode via ?mock=1
+    use_mock = request.query_params.get("mock") == "1"
+    if use_mock and not mam_session_id:
+        mam_session_id = "mock_session_id"
+
+    if not mam_session_id:
+        return template_response(
+            "browse_mam.html",
+            request,
+            user,
+            {
+                "search_term": q or "",
+                "sections": {"new": [], "popular": [], "freeleech": []},
+                "request_id": request_id,
+                "error": "MAM Session ID not configured.",
+            },
+        )
+
+    settings = MamClientSettings(mam_session_id=mam_session_id, use_mock_data=use_mock)
+    client = MyAnonamouseClient(client_session, settings)
+    seed_query = q.strip() if q else "the"
+
+    try:
+        results = normalize_mam_results(await client.search(seed_query, limit=100, categories=[category] if category else None))
+    except Exception as e:
+        logger.error("MAM browse failed", error=str(e))
+        return template_response(
+            "browse_mam.html",
+            request,
+            user,
+            {
+                "search_term": q or "",
+                "sections": {"new": [], "popular": [], "freeleech": []},
+                "request_id": request_id,
+                "error": f"Browse failed: {e}",
+            },
+        )
+
+    sections = _build_mam_sections(results)
+    audio_categories = [c for c in CATEGORY_MAPPINGS if c.name.startswith("Audiobooks")]
+    return template_response(
+        "browse_mam.html",
+        request,
+        user,
+        {
+            "search_term": q or "",
+            "sections": sections,
+            "request_id": request_id,
+            "categories": audio_categories,
+            "selected_category": category,
+        },
     )

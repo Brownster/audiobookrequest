@@ -129,7 +129,6 @@ def read_favicon_16():
 
 
 @router.get("/static/site.webmanifest")
-@add_cache_headers
 def read_site_webmanifest():
     """Serve a manifest with correct base paths and names for PWA installability."""
     base = Settings().app.base_url.rstrip("/") or ""

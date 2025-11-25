@@ -19,6 +19,15 @@ class GroupEnum(str, Enum):
     admin = "admin"
 
 
+class DownloadJobStatus(str, Enum):
+    pending = "pending"
+    downloading = "downloading"
+    seeding = "seeding"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+
+
 class User(BaseModel, table=True):
     username: str = Field(primary_key=True)
     password: str
@@ -83,6 +92,7 @@ class BookSearchResult(BaseBook):
 class BookWishlistResult(BaseBook):
     requested_by: list[str] = []
     download_error: Optional[str] = None
+    mam_unavailable: bool = False
 
     @property
     def amount_requested(self):
@@ -109,6 +119,8 @@ class BookRequest(BaseBook, table=True):
             nullable=False,
         ),
     )
+    mam_unavailable: bool = Field(default=False)
+    mam_last_check: Optional[datetime] = None
 
     __table_args__ = (
         UniqueConstraint("asin", "user_username", name="unique_asin_user"),
@@ -246,3 +258,30 @@ class APIKey(BaseModel, table=True):
         ),
     )
     enabled: bool = True
+
+
+class DownloadJob(BaseModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    request_id: Optional[uuid.UUID] = Field(default=None, foreign_key="bookrequest.id")
+    status: DownloadJobStatus = Field(default=DownloadJobStatus.pending)
+    title: str
+    provider: str = "transmission"
+    
+    # MAM / Tracker Info
+    torrent_id: Optional[str] = None
+    
+    # Client Info
+    transmission_hash: Optional[str] = None
+    transmission_id: Optional[int] = None
+    
+    # Seeding
+    seed_configuration: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    seed_seconds: int = 0
+    last_seed_timestamp: Optional[datetime] = None
+    
+    # Result
+    destination_path: Optional[str] = None
+    message: Optional[str] = None
+    
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None

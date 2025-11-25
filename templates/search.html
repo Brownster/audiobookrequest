@@ -81,19 +81,19 @@
                         hx-swap="outerHTML"
                         hx-on:click="this.disabled = true;"
                         {% if book.downloaded or book.already_requested %}disabled{% endif %}>
-                  <input type="hidden" name="query" value="{{ search_term }}" />
-                  <input type="hidden" name="region" value="{{ selected_region }}" />
-                  <input type="hidden" name="page" value="{{ page }}" />
-                  <input type="hidden" name="search_term" value="{{ search_term }}" />
-                  {% if book.downloaded or book.already_requested %}
-                    <span>{% include "icons/checkmark.html" %}</span>
+                <input type="hidden" name="query" value="{{ search_term }}" />
+                <input type="hidden" name="region" value="{{ selected_region }}" />
+                <input type="hidden" name="page" value="{{ page }}" />
+                <input type="hidden" name="search_term" value="{{ search_term }}" />
+                {% if book.downloaded or book.already_requested %}
+                  <span>{% include "icons/checkmark.html" %}</span>
+                {% else %}
+                  {% if auto_start_download and user.can_download() %}
+                    <span>{% include "icons/download.html" %}</span>
                   {% else %}
-                    {% if auto_start_download and user.can_download() %}
-                      <span>{% include "icons/download.html" %}</span>
-                    {% else %}
-                      <span>{% include "icons/plus.html" %}</span>
-                    {% endif %}
+                    <span>{% include "icons/plus.html" %}</span>
                   {% endif %}
+                {% endif %}
                 </button>
               </div>
               <a class="text-sm text-primary font-bold pt-1"
@@ -114,6 +114,13 @@
                   </a>
                 {% endfor %}
               </div>
+              <form class="mt-1"
+                    hx-post="{{ base_url }}/search/request/{{ book.asin }}/mam"
+                    hx-include="closest form"
+                    hx-swap="none">
+                <input type="hidden" name="region" value="{{ selected_region }}" />
+                <button type="submit" class="link link-primary text-xs">Check on MAM →</button>
+              </form>
             </div>
           {% endfor %}
         </div>
@@ -176,19 +183,19 @@
                             hx-swap="outerHTML"
                             hx-on:click="this.disabled = true;"
                             {% if book.downloaded or book.already_requested %}disabled{% endif %}>
-                      <input type="hidden" name="query" value="" />
-                      <input type="hidden" name="region" value="{{ selected_region }}" />
-                      <input type="hidden" name="page" value="0" />
-                      <input type="hidden" name="search_term" value="" />
-                      {% if book.downloaded or book.already_requested %}
-                        <span>{% include "icons/checkmark.html" %}</span>
+                    <input type="hidden" name="query" value="" />
+                    <input type="hidden" name="region" value="{{ selected_region }}" />
+                    <input type="hidden" name="page" value="0" />
+                    <input type="hidden" name="search_term" value="" />
+                    {% if book.downloaded or book.already_requested %}
+                      <span>{% include "icons/checkmark.html" %}</span>
+                    {% else %}
+                      {% if auto_start_download and user.can_download() %}
+                        <span>{% include "icons/download.html" %}</span>
                       {% else %}
-                        {% if auto_start_download and user.can_download() %}
-                          <span>{% include "icons/download.html" %}</span>
-                        {% else %}
-                          <span>{% include "icons/plus.html" %}</span>
-                        {% endif %}
+                        <span>{% include "icons/plus.html" %}</span>
                       {% endif %}
+                    {% endif %}
                     </button>
                   </div>
                   <a class="text-sm text-primary font-bold pt-1"
@@ -218,6 +225,12 @@
                       <span class="opacity-60">+{{ book.authors | length - 2 }}</span>
                     {% endif %}
                   </div>
+                  <form class="mt-1"
+                        hx-post="{{ base_url }}/search/request/{{ book.asin }}/mam"
+                        hx-swap="none">
+                    <input type="hidden" name="region" value="{{ selected_region }}" />
+                    <button type="submit" class="link link-primary text-xs">Check on MAM →</button>
+                  </form>
                 </div>
               {% endfor %}
             </div>

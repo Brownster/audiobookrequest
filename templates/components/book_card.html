@@ -79,4 +79,15 @@
             {{ book.runtime_length_hrs }}h
         </div>
     {% endif %}
+
+    <!-- MAM quick check -->
+    {% if book.asin %}
+    <form class="mt-1"
+          hx-post="{{ base_url }}/search/request/{{ book.asin }}/mam"
+          hx-swap="none">
+        <button type="submit" class="link link-primary text-[0.7rem]">
+          Check on MAM →
+        </button>
+    </form>
+    {% endif %}
 </div>

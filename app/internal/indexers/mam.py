@@ -2,6 +2,8 @@ import json
 from typing import Any
 from urllib.parse import urlencode, urljoin
 
+from app.internal.clients.mam import MamClientSettings, MyAnonamouseClient
+
 from app.internal.indexers.abstract import (
     AbstractIndexer,
     SessionContainer,
@@ -24,15 +26,103 @@ class MamConfigurations(Configurations):
         display_name="MAM Session ID",
         required=True,
     )
+    download_client: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="Download Client (transmission/qbittorrent)",
+        default="transmission",
+        required=True,
+    )
+    transmission_url: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="Transmission URL",
+        default="http://transmission:9091/transmission/rpc",
+        required=False,
+    )
+    transmission_username: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="Transmission Username",
+        required=False,
+    )
+    transmission_password: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="Transmission Password",
+        required=False,
+    )
+    qbittorrent_url: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="qBittorrent URL",
+        default="http://qbittorrent:8080",
+        required=False,
+    )
+    qbittorrent_username: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="qBittorrent Username",
+        required=False,
+    )
+    qbittorrent_password: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="qBittorrent Password",
+        required=False,
+    )
+    seed_target_hours: IndexerConfiguration[int] = IndexerConfiguration(
+        type=int,
+        display_name="Seed Target (Hours)",
+        default=72,
+        required=True,
+    )
+    qbittorrent_seed_ratio: IndexerConfiguration[float] = IndexerConfiguration(
+        type=float,
+        display_name="qBittorrent Seed Ratio Limit",
+        required=False,
+    )
+    qbittorrent_seed_time: IndexerConfiguration[int] = IndexerConfiguration(
+        type=int,
+        display_name="qBittorrent Seed Time Limit (Minutes)",
+        required=False,
+    )
+    qbittorrent_remote_path_prefix: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="qBittorrent Remote Download Path",
+        required=False,
+        default="",
+    )
+    qbittorrent_local_path_prefix: IndexerConfiguration[str] = IndexerConfiguration(
+        type=str,
+        display_name="qBittorrent Local Path Prefix",
+        required=False,
+        default="",
+    )
+    use_mock_data: IndexerConfiguration[bool] = IndexerConfiguration(
+        type=bool,
+        display_name="Use Mock Data (Dev Only)",
+        default=False,
+        required=False,
+    )
 
 
 class ValuedMamConfigurations(ValuedConfigurations):
     mam_session_id: str
+    download_client: str
+    transmission_url: str | None
+    transmission_username: str | None
+    transmission_password: str | None
+    qbittorrent_url: str | None
+    qbittorrent_username: str | None
+    qbittorrent_password: str | None
+    seed_target_hours: int
+    qbittorrent_seed_ratio: float | None
+    qbittorrent_seed_time: int | None
+    qbittorrent_remote_path_prefix: str | None
+    qbittorrent_local_path_prefix: str | None
+    use_mock_data: bool | None
 
 
 class MamIndexer(AbstractIndexer[MamConfigurations]):
     name = "MyAnonamouse"
-    results: dict[str, dict[str, Any]] = dict()
+
+    def __init__(self):
+        # keep results scoped per instance/run to avoid stale cross-request data
+        self.results: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     async def get_configurations(
@@ -46,46 +136,38 @@ class MamIndexer(AbstractIndexer[MamConfigurations]):
         container: SessionContainer,
         configurations: ValuedMamConfigurations,
     ):
+        # reset results each time so we don't leak between requests
+        self.results = {}
         if not await self.is_enabled(container, configurations):
             return
 
-        params: dict[str, Any] = {
-            "tor[text]": request.title,
-            "tor[main_cat]": [13],  # MAM audiobook category
-            "tor[searchIn]": "torrents",
-            "tor[srchIn][author]": "true",
-            "tor[srchIn][title]": "true",
-            "tor[searchType]": "active",  # only search for torrents with at least 1 seeder.
-            "startNumber": 0,
-            "perpage": 100,
-        }
-
-        url = urljoin(
-            "https://www.myanonamouse.net",
-            f"/tor/js/loadSearchJSONbasic.php?{urlencode(params, doseq=True)}",
+        settings = MamClientSettings(
+            mam_session_id=configurations.mam_session_id,
+            use_mock_data=configurations.use_mock_data or False,
         )
-
-        session_id = configurations.mam_session_id
-
-        async with container.client_session.get(
-            url, cookies={"mam_id": session_id}
-        ) as response:
-            if response.status == 403:
-                logger.error(
-                    "Mam: Failed to authenticate", response=await response.text()
-                )
-                return
-            if not response.ok:
-                logger.error("Mam: Failed to query", response=await response.text())
-                return
-            search_results = await response.json()
-
-        if "error" in search_results:
-            logger.error("Mam: Error in response", error=search_results["error"])
+        client = MyAnonamouseClient(container.client_session, settings)
+        
+        try:
+            # MAM audiobook category is 13, which is the default in MamClientSettings
+            # but we can be explicit if needed.
+            results = await client.search(request.title, limit=100)
+        except Exception as e:
+            logger.error("Mam: Search failed", error=str(e))
             return
 
-        for result in search_results["data"]:
-            self.results[str(result["id"])] = result
+        for result in results:
+            # MamIndexer expects raw dicts keyed by ID
+            # The raw dict from MamSearchResult.raw should be compatible
+            # We might need to ensure 'id' is present and correct type if it was coerced
+            raw = result.raw
+            # Ensure ID is present as it's used as key
+            if "id" not in raw and "id" in result.raw:
+                 # It should be there.
+                 pass
+            
+            # The original code used result["id"]
+            self.results[str(raw.get("id"))] = raw
+            
         logger.info("Mam: Retrieved results", results_amount=len(self.results))
 
     async def is_matching_source(
@@ -102,7 +184,7 @@ class MamIndexer(AbstractIndexer[MamConfigurations]):
         source: ProwlarrSource,
         container: SessionContainer,
     ):
-        mam_id = source.guid.split("/")[-1]
+        mam_id = source.guid.split("-")[-1]
         result = self.results.get(mam_id)
         if result is None:
             return

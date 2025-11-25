@@ -58,6 +58,9 @@
                        href="{{ base_url }}/search?q={{ book.title+' ' +(book.authors|join(",") ) }}"
                        class="font-bold text-primary line-clamp-4"
                        title="{{ book.title }}">{{ book.title }}</a>
+                    {% if book.mam_unavailable %}
+                      <span class="badge badge-warning w-fit mt-1">Waiting on MAM</span>
+                    {% endif %}
                     {% if book.subtitle %}
                       <span class="font-semibold line-clamp-4" title="{{ book.subtitle }}">{{ book.subtitle }}</span>
                     {% endif %}
@@ -69,7 +72,7 @@
                 <td class="lg:hidden">{{ book.release_date.strftime("%Y") }}</td>
                 <td>{{ book.runtime_length_hrs }}</td>
                 <td title="{{ book.requested_by|join('\n') }}">{{ book.amount_requested }}</td>
-                <td class="grid grid-cols-2 min-w-[8rem] gap-1">
+                <td class="grid grid-cols-3 min-w-[10rem] gap-1">
                   <a preload
                      title="Torrent Sources"
                      href="{{ base_url }}/wishlist/sources/{{ book.asin }}"
@@ -99,12 +102,23 @@
                             disabled
                             title="Set as downloaded">{% include "icons/checkmark.html" %}</button>
                   {% else %}
+                    <a class="btn btn-square"
+                       title="Browse on MAM"
+                       href="{{ base_url }}/browse/mam?request_id={{ book.id }}&q={{ book.title | urlencode }}"
+                       {% if not book.id %}disabled{% endif %}>{% include "icons/search.html" %}</a>
                     <button class="btn btn-square"
                             title="Set as downloaded"
                             hx-patch="{{ base_url }}/wishlist/downloaded/{{ book.asin }}"
                             hx-swap="outerHTML"
                             hx-target="#book-table-body"
                             hx-disabled-elt="this">{% include "icons/checkmark.html" %}</button>
+                    <button class="btn btn-square btn-secondary"
+                            title="Auto download via MAM"
+                            hx-post="{{ base_url }}/wishlist/mam-auto/{{ book.id }}"
+                            hx-swap="outerHTML"
+                            hx-target="#book-table-body"
+                            hx-disabled-elt="this"
+                            {% if not user.can_download() or book.downloaded %}disabled{% endif %}>{% include "icons/download.html" %}</button>
                   {% endif %}
                 </td>
               </tr>

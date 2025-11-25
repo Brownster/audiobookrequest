@@ -8,7 +8,17 @@ services:
       - ./config:/config
     ports:
       - "8012:8000"
+    environment:
+      - ABR_APP__PORT=8000
+      - ABR_DB__USE_POSTGRES=true
+      - ABR_DB__POSTGRES_HOST=psql
+      - ABR_DB__POSTGRES_PORT=5432
+      - ABR_DB__POSTGRES_DB=audiobookrequest
+      - ABR_DB__POSTGRES_USER=abr
+      - ABR_DB__POSTGRES_PASSWORD=password
     restart: unless-stopped
+    depends_on:
+      - psql
 
   gotify:
     image: gotify/server
@@ -29,4 +39,3 @@ services:
     ports:
       - "5432:5432"
     restart: unless-stopped
-

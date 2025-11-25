@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from collections import defaultdict
 from typing import Annotated, Literal, Optional
 
@@ -24,8 +25,12 @@ from app.internal.models import (
     EventEnum,
     GroupEnum,
     ManualBookRequest,
+    DownloadJob,
+    DownloadJobStatus,
     User,
 )
+from app.internal.clients.mam import MamClientSettings, MyAnonamouseClient
+from app.internal.indexers.configuration import indexer_configuration_cache
 from app.internal.notifications import (
     send_all_manual_notifications,
     send_all_notifications,
@@ -38,6 +43,7 @@ from app.internal.prowlarr.prowlarr import (
     start_download,
 )
 from app.internal.query import query_sources
+from app.internal.services.download_manager import DownloadManager
 from app.util.connection import get_connection
 from app.util.db import get_session, open_session
 from app.util.redirect import BaseUrlRedirectResponse
@@ -125,6 +131,7 @@ def get_wishlist_books(
     for asin, book in distinct_books.items():
         b = BookWishlistResult.model_validate(book)
         b.requested_by = usernames[asin]
+        b.mam_unavailable = getattr(book, "mam_unavailable", False)
         if b.downloaded:
             downloaded.append(b)
         else:
@@ -460,3 +467,108 @@ async def start_auto_download(
         },
         block_name="book_wishlist",
     )
+
+
+@router.post("/mam-auto/{request_id}")
+async def auto_download_mam(
+    request: Request,
+    request_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    client_session: Annotated[ClientSession, Depends(get_connection)],
+    user: DetailedUser = Security(ABRAuth(GroupEnum.trusted)),
+):
+    def _render(toast_error: str | None = None, toast_info: str | None = None, toast_success: str | None = None):
+        books = get_wishlist_books(session, None if user.is_admin() else user.username, "not_downloaded")
+        counts = get_wishlist_counts(session, user)
+        return template_response(
+            "wishlist_page/wishlist.html",
+            request,
+            user,
+            {
+                "books": books,
+                "page": "wishlist",
+                "counts": counts,
+                "update_tablist": True,
+                **({"toast_error": toast_error} if toast_error else {}),
+                **({"toast_info": toast_info} if toast_info else {}),
+                **({"toast_success": toast_success} if toast_success else {}),
+            },
+            block_name="book_wishlist",
+        )
+
+    try:
+        req_uuid = uuid.UUID(request_id)
+    except Exception:
+        return _render(toast_error="Invalid request id")
+
+    book_request = session.get(BookRequest, req_uuid)
+    if not book_request:
+        return _render(toast_error="Request not found")
+
+    mam_session_id = indexer_configuration_cache.get(session, "MyAnonamouse_mam_session_id")
+    if not mam_session_id:
+        return _render(toast_error="MAM session not configured")
+
+    settings = MamClientSettings(mam_session_id=mam_session_id)
+    mam_client = MyAnonamouseClient(client_session, settings)
+
+    # Use title (and author if present) to search MAM
+    query = book_request.title
+    if book_request.authors:
+        query = f"{book_request.title} {', '.join(book_request.authors)}"
+
+    results = await mam_client.search(query, limit=40)
+    if not results:
+        book_request.mam_unavailable = True
+        book_request.mam_last_check = datetime.utcnow()
+        session.add(book_request)
+        session.commit()
+        return _render(toast_error="No MAM results found")
+
+    # Pick the best seeded result
+    best = max(results, key=lambda r: (r.seeders, r.peers, -r.size))
+    torrent_id = str(best.raw.get("id") or best.guid.split("-")[-1])
+    if not torrent_id:
+        book_request.mam_unavailable = True
+        book_request.mam_last_check = datetime.utcnow()
+        session.add(book_request)
+        session.commit()
+        return _render(toast_error="MAM result missing torrent id")
+
+    # Avoid duplicate active jobs
+    existing_job = session.exec(
+        select(BookRequest, DownloadJob)
+        .join(DownloadJob, DownloadJob.request_id == BookRequest.id, isouter=True)
+        .where(
+            BookRequest.id == book_request.id,
+            DownloadJob.torrent_id == torrent_id,
+            DownloadJob.status.in_(
+                [
+                    DownloadJobStatus.pending,
+                    DownloadJobStatus.downloading,
+                    DownloadJobStatus.seeding,
+                    DownloadJobStatus.processing,
+                ]
+            ),
+        )
+    ).first()
+    if existing_job:
+        return _render(toast_info="Already queued/downloading via MAM.")
+
+    job = DownloadJob(
+        request_id=book_request.id,
+        title=best.title or book_request.title,
+        torrent_id=torrent_id,
+        status=DownloadJobStatus.pending,
+        provider="qbittorrent",
+        message="Queued via MAM auto-download",
+    )
+    session.add(job)
+    book_request.mam_unavailable = False
+    book_request.mam_last_check = datetime.utcnow()
+    session.add(book_request)
+    session.commit()
+
+    await DownloadManager.get_instance().submit_job(str(job.id))
+
+    return _render(toast_success="MAM download queued")

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block head %}
+  <title>Downloads</title>
+{% endblock head %}
+{% block body %}
+  <div class="w-screen flex flex-col items-center justify-center p-6 sm:p-8 overflow-x-hidden gap-4">
+    <div class="w-full max-w-6xl flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold">Downloads</h1>
+        <p class="text-sm opacity-70">Track each step: MAM → qBittorrent → Post-processing → Audiobookshelf.</p>
+      </div>
+      <div class="text-sm opacity-70">Auto-refreshing</div>
+    </div>
+    <div class="w-full max-w-6xl"
+         id="downloads-table"
+         hx-get="{{ base_url }}/downloads/fragment"
+         hx-trigger="load, every 6s"
+         hx-target="#downloads-table"
+         hx-swap="outerHTML">
+      <div class="p-6 border rounded-box">Loading…</div>
+    </div>
+  </div>
+{% endblock body %}
