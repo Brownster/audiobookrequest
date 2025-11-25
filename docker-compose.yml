@@ -6,6 +6,10 @@ services:
         - VERSION=local
     volumes:
       - ./config:/config
+      # Optional: map media paths used by torrent clients and Audiobookshelf
+      # - /path/on/host/torrents:/downloads
+      # - /path/on/host/audiobooks:/audiobooks
+      # - /path/on/host/watch:/watch
     ports:
       - "8012:8000"
     environment:
