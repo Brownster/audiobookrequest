@@ -31,8 +31,6 @@ If you've heard of Overseer, Ombi, or Jellyseer; this is in the similar vein, <i
 
 AudioBookRequest aims to be a simple and lightweight tool for managing audiobook requests for your media server. It should be easy to set up and use, while integrating nicely with other common tools in the \*arr stack. AudioBookRequest serves as as the frontend for you and your friends to easily make audiobook wishlists or create requests in an organized fashion.
 
-It is not intended as a full replacement for Readarr/Chaptarr, but instead intended to be used alongside them.
-
 ## Features
 
 - Employs the Audible API to make it easy to search for and request audiobooks.
