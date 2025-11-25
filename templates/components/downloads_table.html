@@ -51,7 +51,8 @@
                 {% endif %}
               </td>
               <td class="text-sm">
-                {% if job.status|lower == "failed" %}
+                {% set st = job.status|lower %}
+                {% if st == "failed" or (st == "seeding" and not job.destination_path) %}
                   <button class="btn btn-xs btn-primary"
                           hx-post="{{ base_url }}/downloads/{{ job.id }}/reprocess"
                           hx-target="#downloads-table"

@@ -575,45 +575,74 @@ class DownloadManager:
                 session.commit()
 
     async def reprocess_job(self, job_id: str) -> bool:
-        """Manually trigger post-processing for a job (e.g., after fixing path mapping)."""
+        """Manually trigger a retry. If the torrent was never added, requeue download; otherwise retry post-processing."""
         if not self.http_session:
             self.http_session = ClientSession()
-        if not self.torrent_client:
-            return False
 
         job_uuid = self._coerce_uuid(job_id)
         if job_uuid is None:
             return False
 
+        snapshot = {}
         with open_session() as session:
             job = session.get(DownloadJob, job_uuid)
-            if not job or not job.transmission_hash:
+            if not job:
                 return False
 
-            # mark as processing
-            job.status = DownloadJobStatus.processing
-            job.message = "Retrying post-processing"
-            session.add(job)
-            session.commit()
+            job.completed_at = None
 
-            # fetch latest torrent snapshot
-            torrents = await self.torrent_client.get_torrents([job.transmission_hash])
-            snapshot = torrents.get(job.transmission_hash) or next(iter(torrents.values()), {})
-            if isinstance(self.torrent_client, QbitClient) and snapshot and not snapshot.get("files"):
-                try:
-                    snapshot["files"] = await self.torrent_client.list_files(job.transmission_hash)
-                except Exception as exc:
-                    logger.warning("DownloadManager: unable to fetch qBittorrent file list", error=str(exc))
+            # If we never registered a torrent hash, requeue from the start
+            if not job.transmission_hash:
+                job.status = DownloadJobStatus.pending
+                job.message = "Retrying download"
+                session.add(job)
+                session.commit()
+                await self.submit_job(job_id)
+                return True
 
-        if not snapshot:
-            with open_session() as session:
-                job = session.get(DownloadJob, job_uuid)
-                if job:
-                    job.status = DownloadJobStatus.failed
-                    job.message = "Post-processing retry failed: torrent not found"
-                    session.add(job)
-                    session.commit()
-            return False
+            # Ensure torrent client exists for re-finalization
+            if not self.torrent_client:
+                container = SessionContainer(session=session, client_session=self.http_session)
+                mam_config_def = await MamIndexer.get_configurations(container)
+                config = cast(ValuedMamConfigurations, create_valued_configuration(mam_config_def, session, check_required=False))
+                client_type = config.download_client or "transmission"
+                if client_type == "qbittorrent":
+                    self.torrent_client = QbitClient(
+                        self.http_session,
+                        config.qbittorrent_url or "http://qbittorrent:8080",
+                        config.qbittorrent_username or "",
+                        config.qbittorrent_password or "",
+                    )
+                else:
+                    self.torrent_client = TransmissionClient(
+                        self.http_session,
+                        config.transmission_url or "http://transmission:9091/transmission/rpc",
+                        config.transmission_username,
+                        config.transmission_password,
+                    )
+
+            if self.torrent_client:
+                torrents = await self.torrent_client.get_torrents([job.transmission_hash])
+                snapshot = torrents.get(job.transmission_hash) or next(iter(torrents.values()), {})
+                if isinstance(self.torrent_client, QbitClient) and snapshot and not snapshot.get("files"):
+                    try:
+                        snapshot["files"] = await self.torrent_client.list_files(job.transmission_hash)
+                    except Exception as exc:
+                        logger.warning("DownloadManager: unable to fetch qBittorrent file list", error=str(exc))
+
+            if snapshot:
+                job.status = DownloadJobStatus.processing
+                job.message = "Retrying post-processing"
+                session.add(job)
+                session.commit()
+            else:
+                # Torrent missing; requeue download
+                job.status = DownloadJobStatus.pending
+                job.message = "Retrying download (torrent missing)"
+                session.add(job)
+                session.commit()
+                await self.submit_job(job_id)
+                return True
 
         await self._finalize_job(job_id, snapshot)
         return True
