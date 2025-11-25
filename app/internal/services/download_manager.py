@@ -517,6 +517,12 @@ class DownloadManager:
 
             remote_prefix = (config.qbittorrent_remote_path_prefix or "").rstrip("/")
             local_prefix = (config.qbittorrent_local_path_prefix or "").rstrip("/")
+
+            # Fallback to global qB settings if MAM-specific prefixes are unset
+            if not remote_prefix:
+                remote_prefix = (indexer_configuration_cache.get(session, "qbittorrent_remote_path_prefix") or "").rstrip("/")
+            if not local_prefix:
+                local_prefix = (indexer_configuration_cache.get(session, "qbittorrent_local_path_prefix") or "").rstrip("/")
             if (
                 download_dir
                 and remote_prefix
