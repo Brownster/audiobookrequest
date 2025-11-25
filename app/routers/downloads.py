@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 
 from app.internal.auth.authentication import ABRAuth, DetailedUser
 from app.internal.models import DownloadJob
+from app.internal.services.download_manager import DownloadManager
 from app.util.db import get_session
 from app.util.templates import template_response
 
@@ -45,6 +46,28 @@ async def downloads_fragment(
     session: Session = Depends(get_session),
     user: DetailedUser = Security(ABRAuth()),
 ):
+    jobs = session.exec(
+        select(DownloadJob).order_by(desc(DownloadJob.created_at)).limit(100)
+    ).all()
+    serialized = [_serialize_job(j) for j in jobs]
+    return template_response(
+        "components/downloads_table.html",
+        request,
+        user,
+        {"jobs": serialized},
+    )
+
+
+@router.post("/downloads/{job_id}/reprocess")
+async def reprocess_download(
+    job_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    user: DetailedUser = Security(ABRAuth()),
+):
+    dm = DownloadManager.get_instance()
+    await dm.reprocess_job(job_id)
+
     jobs = session.exec(
         select(DownloadJob).order_by(desc(DownloadJob.created_at)).limit(100)
     ).all()

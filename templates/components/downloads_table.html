@@ -12,6 +12,7 @@
             <th>Added</th>
             <th>Finished</th>
             <th>Client</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -47,6 +48,18 @@
                 {{ job.provider or "qBittorrent" }}
                 {% if job.hash %}
                   <div class="text-xs opacity-70 truncate" title="{{ job.hash }}">hash {{ job.hash }}</div>
+                {% endif %}
+              </td>
+              <td class="text-sm">
+                {% if job.status|lower == "failed" %}
+                  <button class="btn btn-xs btn-primary"
+                          hx-post="{{ base_url }}/downloads/{{ job.id }}/reprocess"
+                          hx-target="#downloads-table"
+                          hx-swap="outerHTML">
+                    Retry
+                  </button>
+                {% else %}
+                  <span class="opacity-50 text-xs">—</span>
                 {% endif %}
               </td>
             </tr>
