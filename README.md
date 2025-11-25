@@ -1,8 +1,3 @@
-![GitHub Release](https://img.shields.io/github/v/release/markbeep/AudioBookRequest?style=for-the-badge)
-![Python Version](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fmarkbeep%2FAudioBookRequest%2Fmain%2Fpyproject.toml&style=for-the-badge&logo=python)
-
-
-![Header](/media/AudioBookRequestIcon.png)
 
 Your tool for handling audiobook requests on a Plex/Audiobookshelf/Jellyfin instance.
 
