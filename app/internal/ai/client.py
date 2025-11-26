@@ -20,7 +20,6 @@ class AICategory(TypedDict, total=False):
 
 # Simple in-memory cache for per-user AI category generation
 _AI_CATEGORY_CACHE: Dict[str, tuple[float, List[AICategory]]] = {}
-_AI_CATEGORY_TTL_SECONDS = 60 * 30  # 30 minutes
 
 
 def _cache_key_for_user(user: Optional[User]) -> str:
@@ -58,9 +57,10 @@ async def fetch_ai_categories(
 
     cache_key = _cache_key_for_user(user)
     now = time.time()
+    ttl = ai_config.get_cache_ttl_seconds(session)
     if use_cache:
         hit = _AI_CATEGORY_CACHE.get(cache_key)
-        if hit and (hit[0] + _AI_CATEGORY_TTL_SECONDS) > now and len(hit[1]) >= 1:
+        if hit and (hit[0] + ttl) > now and len(hit[1]) >= 1:
             logger.info("Using cached AI categories", count=len(hit[1]))
             return hit[1][:desired_count]
 
@@ -355,7 +355,6 @@ class AIBookRec(TypedDict, total=False):
 
 # Cache for AI book-level recommendations
 _AI_BOOKREC_CACHE: Dict[str, tuple[float, List[AIBookRec]]] = {}
-_AI_BOOKREC_TTL_SECONDS = 60 * 30
 
 
 async def fetch_ai_book_recommendations(
@@ -380,9 +379,10 @@ async def fetch_ai_book_recommendations(
 
     cache_key = _cache_key_for_user(user)
     now = time.time()
+    ttl = ai_config.get_cache_ttl_seconds(session)
     if use_cache:
         hit = _AI_BOOKREC_CACHE.get(cache_key)
-        if hit and (hit[0] + _AI_BOOKREC_TTL_SECONDS) > now and len(hit[1]) >= 1:
+        if hit and (hit[0] + ttl) > now and len(hit[1]) >= 1:
             logger.info("Using cached AI book recs", count=len(hit[1]))
             return hit[1][:desired_count]
 

@@ -25,6 +25,7 @@ async def read_ai_settings(
     model = ai_config.get_model(session) or ""
     provider = ai_config.get_provider(session) or "ollama"
     api_key = ai_config.get_api_key(session) or ""
+    cache_ttl_days = ai_config.get_cache_ttl_days(session)
     return template_response(
         "settings_page/ai.html",
         request,
@@ -35,6 +36,7 @@ async def read_ai_settings(
             "ai_model": model,
             "ai_provider": provider,
             "ai_api_key": api_key,
+            "ai_cache_ttl_days": cache_ttl_days,
         },
     )
 
@@ -46,6 +48,7 @@ def update_ai_config(
     endpoint: Annotated[str, Form(alias="endpoint")],
     model: Annotated[str, Form(alias="model")],
     api_key: Annotated[str | None, Form(alias="api_key")] = None,
+    cache_ttl_days: Annotated[int | None, Form(alias="cache_ttl_days")] = None,
     admin_user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
     ai_config.set_provider(session, provider.strip() or "ollama")
@@ -53,6 +56,8 @@ def update_ai_config(
     ai_config.set_model(session, model)
     if api_key is not None:
         ai_config.set_api_key(session, api_key.strip())
+    if cache_ttl_days is not None:
+        ai_config.set_cache_ttl_days(session, cache_ttl_days)
     return Response(status_code=204, headers={"HX-Refresh": "true"})
 
 

@@ -38,6 +38,19 @@
         <div class="text-xs opacity-60">Required for OpenAI; ignored for Ollama.</div>
       </div>
 
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="form-control">
+          <label class="label"><span class="label-text">AI cache TTL (days)</span></label>
+          <input name="cache_ttl_days"
+                 type="number"
+                 min="1"
+                 max="7"
+                 class="input input-bordered"
+                 value="{{ ai_cache_ttl_days or 1 }}" />
+          <div class="text-xs opacity-60">How long to cache AI recommendations before re-calling the model (1–7 days).</div>
+        </div>
+      </div>
+
       <div class="mt-2"><button class="btn btn-primary">Save</button></div>
     </form>
 

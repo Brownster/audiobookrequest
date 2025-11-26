@@ -10,6 +10,7 @@ AIConfigKey = Literal[
     "ai_endpoint",
     "ai_model",
     "ai_api_key",
+    "ai_cache_ttl_days",
     "ai_ollama_endpoint",
     "ai_ollama_model",
     "ai_openai_endpoint",
@@ -80,6 +81,22 @@ class AIConfig(StringConfigCache[AIConfigKey]):
         if self.get_provider(session) == "openai":
             return bool(self.get_api_key(session))
         return True
+
+    def get_cache_ttl_days(self, session: Session) -> int:
+        """Return user-configured cache TTL in days (clamped)."""
+        raw = self.get(session, "ai_cache_ttl_days")
+        try:
+            val = int(raw) if raw is not None else 1
+        except (TypeError, ValueError):
+            val = 1
+        return max(1, min(val, 7))
+
+    def set_cache_ttl_days(self, session: Session, days: int):
+        days = max(1, min(days, 7))
+        self.set(session, "ai_cache_ttl_days", str(days))
+
+    def get_cache_ttl_seconds(self, session: Session) -> int:
+        return self.get_cache_ttl_days(session) * 24 * 60 * 60
 
 
 ai_config = AIConfig()
