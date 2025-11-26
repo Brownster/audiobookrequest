@@ -52,6 +52,9 @@ class PostProcessor:
         """
         download_dir = Path(torrent_snapshot.get("downloadDir", ""))
         metadata = self._extract_metadata(request)
+        if not download_dir.exists() and download_dir.parent.exists():
+            download_dir = download_dir.parent
+            logger.debug("PostProcessor: adjusted download_dir to parent", base=str(download_dir))
         
         # Determine source path
         # torrent_snapshot['name'] is usually the folder name or file name
