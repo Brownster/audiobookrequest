@@ -121,8 +121,9 @@
                   {% else %}
                     <a class="btn btn-square"
                        title="Browse on MAM"
-                       href="{{ base_url }}/browse/mam?request_id={{ book.id }}&q={{ book.title | urlencode }}"
-                       {% if not book.id %}disabled{% endif %}>{% include "icons/search.html" %}</a>
+                       href="{{ base_url }}/search/browse/mam?{% if book.id %}request_id={{ book.id }}&{% endif %}q={{ book.title | urlencode }}">
+                      {% include "icons/search.html" %}
+                    </a>
                     <button class="btn btn-square"
                             title="Set as downloaded"
                             hx-patch="{{ base_url }}/wishlist/downloaded/{{ book.asin }}"

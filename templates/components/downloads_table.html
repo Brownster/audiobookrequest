@@ -53,12 +53,21 @@
               <td class="text-sm">
                 {% set st = job.status|lower %}
                 {% if st == "failed" or (st == "seeding" and not job.destination_path) %}
-                  <button class="btn btn-xs btn-primary"
-                          hx-post="{{ base_url }}/downloads/{{ job.id }}/reprocess"
-                          hx-target="#downloads-table"
-                          hx-swap="outerHTML">
-                    Retry
-                  </button>
+                  <div class="flex gap-2">
+                    <button class="btn btn-xs btn-primary"
+                            hx-post="{{ base_url }}/downloads/{{ job.id }}/reprocess"
+                            hx-target="#downloads-table"
+                            hx-swap="outerHTML">
+                      Retry
+                    </button>
+                    <button class="btn btn-xs"
+                            hx-post="{{ base_url }}/downloads/{{ job.id }}/delete"
+                            hx-target="#downloads-table"
+                            hx-swap="outerHTML"
+                            hx-confirm="Remove this download entry?">
+                      Remove
+                    </button>
+                  </div>
                 {% else %}
                   <span class="opacity-50 text-xs">—</span>
                 {% endif %}

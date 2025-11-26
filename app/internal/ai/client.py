@@ -50,7 +50,9 @@ async def fetch_ai_categories(
     """
     endpoint = ai_config.get_endpoint(session)
     model = ai_config.get_model(session)
-    if not endpoint or not model:
+    provider = ai_config.get_provider(session)
+    api_key = ai_config.get_api_key(session)
+    if not endpoint or not model or (provider == "openai" and not api_key):
         logger.info("AI not configured; skipping category generation")
         return None
 
@@ -135,38 +137,91 @@ async def fetch_ai_categories(
         ],
     }
 
-    body = {
-        "model": model,
-        "prompt": (
-            f"SYSTEM: {system_instructions}\n\n" + "USER: " + json.dumps(user_prompt, ensure_ascii=False)
-        ),
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.2},
-    }
+    logger.info(
+        "Requesting AI categories",
+        endpoint=endpoint,
+        model=model,
+        desired_count=desired_count,
+        provider=provider,
+    )
+    headers: dict[str, str] = {}
+    url: str
+    body: dict[str, Any]
+    if provider == "openai":
+        url = f"{endpoint}/v1/chat/completions"
+        headers["Authorization"] = f"Bearer {api_key}"
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_instructions},
+                {"role": "user", "content": json.dumps(user_prompt, ensure_ascii=False)},
+            ],
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+        }
+    else:
+        url = f"{endpoint}/api/generate"
+        body = {
+            "model": model,
+            "prompt": (
+                f"SYSTEM: {system_instructions}\n\n"
+                + "USER: "
+                + json.dumps(user_prompt, ensure_ascii=False)
+            ),
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0.2},
+        }
 
-    url = f"{endpoint}/api/generate"
-    logger.info("Requesting AI categories", endpoint=endpoint, model=model, desired_count=desired_count)
     try:
         timeout = ClientTimeout(total=30)
-        async with client_session.post(url, json=body, timeout=timeout) as resp:
+        async with client_session.post(url, json=body, timeout=timeout, headers=headers) as resp:
             ctype = resp.headers.get("Content-Type", "")
             if resp.status != 200:
-                logger.info("AI generate returned non-200", status=resp.status, content_type=ctype)
+                try:
+                    err_preview = await resp.text()
+                except Exception:
+                    err_preview = "<unable to read body>"
+                logger.info(
+                    "AI generate returned non-200",
+                    status=resp.status,
+                    content_type=ctype,
+                    body=err_preview[:500],
+                )
                 return None
 
             # Be robust to wrong content-type: try JSON first without content-type guard
             parsed_envelope: Dict[str, Any] | List[Any] | None = None
+            raw_text: str | None = None
+            raw_dump: str | None = None
             try:
                 parsed_envelope = await resp.json(content_type=None)
+                try:
+                    raw_dump = json.dumps(parsed_envelope)
+                except Exception:
+                    raw_dump = None
             except Exception as je:
-                logger.info("AI response not JSON envelope; reading text", error=str(je), content_type=ctype)
+                try:
+                    raw_text = await resp.text()
+                except Exception:
+                    raw_text = None
+                logger.info("AI response not JSON envelope; reading text", error=str(je), content_type=ctype, raw_preview=(raw_text or "")[:500])
 
-            # If we got a JSON envelope with a 'response' field, that's the model text
+            # If we got a JSON envelope, extract the model text based on provider
             parsed_obj: list[dict[str, Any]] | dict[str, Any] | None = None
             model_text: str | None = None
             if isinstance(parsed_envelope, dict):
-                if "response" in parsed_envelope:
+                if provider == "openai" and "choices" in parsed_envelope:
+                    try:
+                        choice = parsed_envelope["choices"][0]
+                        message = choice.get("message", {})
+                        content = message.get("content", "")
+                        if isinstance(content, str):
+                            model_text = content
+                    except Exception as e:
+                        logger.info("AI response parse (choices) failed", error=str(e))
+                        model_text = None
+                elif "response" in parsed_envelope:
                     raw_response: object | None = parsed_envelope.get("response")
                     if isinstance(raw_response, str):
                         model_text = raw_response
@@ -180,7 +235,12 @@ async def fetch_ai_categories(
                 parsed_obj = [p for p in parsed_envelope if isinstance(p, dict)]
             else:
                 # Fallback to text and parse JSON from it
-                model_text = await resp.text()
+                if raw_text is None:
+                    try:
+                        raw_text = await resp.text()
+                    except Exception:
+                        raw_text = None
+                model_text = raw_text
 
             if model_text is not None:
                 stripped = model_text.strip()
@@ -200,12 +260,18 @@ async def fetch_ai_categories(
                     elif start_obj != -1 and end_obj != -1 and end_obj > start_obj:
                         parsed_obj = json.loads(stripped[start_obj : end_obj + 1])
                     else:
-                        logger.info("AI response did not contain JSON payload")
+                        logger.info("AI response did not contain JSON payload", raw=stripped[:500])
                         return None
 
             items_raw: list[dict[str, Any]]
             if isinstance(parsed_obj, dict):
-                items_raw = [parsed_obj]
+                # Handle wrapped payloads like {"output_schema": [...]}
+                if isinstance(parsed_obj.get("output_schema"), list):
+                    items_raw = [
+                        p for p in parsed_obj.get("output_schema", []) if isinstance(p, dict)
+                    ]
+                else:
+                    items_raw = [parsed_obj]
             elif isinstance(parsed_obj, list):
                 items_raw = list(parsed_obj)
             else:
@@ -237,7 +303,8 @@ async def fetch_ai_categories(
                     }
                 )
             if not categories:
-                logger.info("AI returned zero valid categories after parsing")
+                preview = raw_dump or raw_text
+                logger.info("AI returned zero valid categories after parsing", raw_preview=(preview or "")[:500])
                 return None
             _AI_CATEGORY_CACHE[cache_key] = (now, categories)
             logger.info("AI categories generated", count=len(categories))

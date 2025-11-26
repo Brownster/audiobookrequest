@@ -3,28 +3,42 @@
 <div class="card bg-base-200">
   <div class="card-body gap-6">
     <div>
-      <h2 class="card-title">AI Recommendations (Ollama)</h2>
-      <p class="opacity-70">Configure your local or remote Ollama server and model to power AI-based recommendations.</p>
+      <h2 class="card-title">AI Recommendations</h2>
+      <p class="opacity-70">Use a local Ollama server or the OpenAI API to power AI-based recommendations.</p>
     </div>
 
-    <div class="divider">Connection</div>
-    <form hx-put="{{ base_url }}/settings/ai/endpoint" hx-swap="none" class="flex flex-col gap-2">
-      <label class="label"><span class="label-text">Ollama Endpoint</span></label>
-      <input name="endpoint" type="text" class="input input-bordered" placeholder="http://localhost:11434" value="{{ ai_endpoint }}" />
-      <div class="text-xs opacity-60">
-        The base URL to your Ollama server (e.g., http://localhost:11434).
-        If ABR runs in Docker and Ollama runs on the host, use
-        <code>http://host.docker.internal:11434</code> (Linux may require enabling it or using your host gateway IP).
+    <div class="divider">Configuration</div>
+    <form hx-post="{{ base_url }}/settings/ai/config" hx-swap="none" class="flex flex-col gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="form-control">
+          <label class="label"><span class="label-text">Provider</span></label>
+          <select name="provider" class="select select-bordered">
+            <option value="ollama" {% if ai_provider == "ollama" %}selected{% endif %}>Ollama</option>
+            <option value="openai" {% if ai_provider == "openai" %}selected{% endif %}>OpenAI</option>
+          </select>
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text">Model</span></label>
+          <input name="model" type="text" class="input input-bordered" placeholder="llama3.1 or gpt-4o-mini" value="{{ ai_model }}" />
+        </div>
       </div>
-      <div class="mt-2"><button class="btn btn-primary">Save Endpoint</button></div>
-    </form>
 
-    <div class="divider">Model</div>
-    <form hx-put="{{ base_url }}/settings/ai/model" hx-swap="none" class="flex flex-col gap-2">
-      <label class="label"><span class="label-text">Model</span></label>
-      <input name="model" type="text" class="input input-bordered" placeholder="llama3.1" value="{{ ai_model }}" />
-      <div class="text-xs opacity-60">Name of the model available in your Ollama (e.g., llama3.1, mistral, qwen, etc.)</div>
-      <div class="mt-2"><button class="btn btn-primary">Save Model</button></div>
+      <div class="form-control">
+        <label class="label"><span class="label-text">Endpoint</span></label>
+        <input name="endpoint" type="text" class="input input-bordered" placeholder="http://localhost:11434 or https://api.openai.com" value="{{ ai_endpoint }}" />
+        <div class="text-xs opacity-60">
+          Ollama: e.g., http://localhost:11434 or http://host.docker.internal:11434 (when ABR is in Docker).<br>
+          OpenAI: leave as https://api.openai.com or point to a compatible proxy.
+        </div>
+      </div>
+
+      <div class="form-control">
+        <label class="label"><span class="label-text">API Key (OpenAI only)</span></label>
+        <input name="api_key" type="password" class="input input-bordered" placeholder="sk-..." value="{{ ai_api_key }}" />
+        <div class="text-xs opacity-60">Required for OpenAI; ignored for Ollama.</div>
+      </div>
+
+      <div class="mt-2"><button class="btn btn-primary">Save</button></div>
     </form>
 
     <div class="divider">Diagnostics</div>
