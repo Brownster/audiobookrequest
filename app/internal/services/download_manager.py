@@ -444,6 +444,23 @@ class DownloadManager:
                     job.seed_seconds = max(job.seed_seconds, int(elapsed))
 
                 # Determine completion
+                state = t_info.get("state") or t_info.get("status") or ""
+                state_lower = str(state).lower()
+                if state:
+                    # Set a more accurate message/status based on qBittorrent state
+                    inactive_states = {"pausedup", "pauseup", "pauseddl", "queuedup", "queueddl", "stalledup", "checkingup"}
+                    downloading_states = {"downloading", "stalleddl", "forceddl"}
+                    uploading_states = {"uploading", "forcedup"}
+                    if state_lower in downloading_states:
+                        job.status = DownloadJobStatus.downloading
+                        job.message = f"qB state: {state}"
+                    elif state_lower in inactive_states:
+                        job.status = DownloadJobStatus.seeding
+                        job.message = f"qB state: {state} (inactive, consider force resume)"
+                    elif state_lower in uploading_states:
+                        job.status = DownloadJobStatus.seeding
+                        job.message = f"qB state: {state}"
+
                 left_until_done = t_info.get("leftUntilDone")
                 progress = t_info.get("progress")
                 is_downloaded = False
@@ -530,7 +547,8 @@ class DownloadManager:
                 and local_prefix
                 and str(download_dir).startswith(remote_prefix)
             ):
-                download_dir = local_prefix + str(download_dir)[len(remote_prefix) :]
+                suffix = str(download_dir)[len(remote_prefix):] if remote_prefix != "/" else str(download_dir)
+                download_dir = (local_prefix + suffix).replace("//", "/")
                 logger.info(
                     "DownloadManager: mapped remote path",
                     remote_prefix=remote_prefix,
