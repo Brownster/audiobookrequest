@@ -93,6 +93,8 @@ class BookWishlistResult(BaseBook):
     requested_by: list[str] = []
     download_error: Optional[str] = None
     mam_unavailable: bool = False
+    pipeline_status: Optional[str] = None
+    pipeline_message: Optional[str] = None
 
     @property
     def amount_requested(self):

@@ -5,7 +5,6 @@
 {% block content %}
   <div class="overflow-x-auto h-[75vh] border-b pb-2 border-b-base-200">
     {% block book_wishlist %}
-      {% if update_tablist %}{% include "wishlist_page/tablist.html" %}{% endif %}
       <table id="book-table-body" class="table table-pin-rows min-w-[60rem]">
         <thead>
           <tr>
@@ -17,6 +16,7 @@
             <th>Release</th>
             <th>Length (hrs)</th>
             <th># Requested</th>
+            <th>Status</th>
             <th></th>
           </tr>
         </thead>
@@ -72,7 +72,24 @@
                 <td class="lg:hidden">{{ book.release_date.strftime("%Y") }}</td>
                 <td>{{ book.runtime_length_hrs }}</td>
                 <td title="{{ book.requested_by|join('\n') }}">{{ book.amount_requested }}</td>
-                <td class="grid grid-cols-3 min-w-[10rem] gap-1">
+                <td>
+                  {% set st = (book.pipeline_status or 'pending')|lower %}
+                  {% set badge = "badge-ghost" %}
+                  {% if st in ["completed"] %}{% set badge = "badge-success" %}
+                  {% elif st in ["failed","no_results"] %}{% set badge = "badge-error" %}
+                  {% elif st in ["processing","downloading","seeding","pending"] %}{% set badge = "badge-info" %}
+                  {% endif %}
+                  <div class="flex flex-col gap-1">
+                    <span class="badge {{ badge }} gap-1 capitalize">{{ st }}</span>
+                    {% if book.pipeline_message %}
+                      <span class="text-[0.65rem] opacity-70 line-clamp-2" title="{{ book.pipeline_message }}">{{ book.pipeline_message }}</span>
+                    {% endif %}
+                    {% if book.mam_unavailable %}
+                      <span class="badge badge-warning w-fit">Waiting on MAM</span>
+                    {% endif %}
+                  </div>
+                </td>
+                <td class="grid grid-cols-3 min-w-[12rem] gap-1">
                   <a preload
                      title="Torrent Sources"
                      href="{{ base_url }}/wishlist/sources/{{ book.asin }}"

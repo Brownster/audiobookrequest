@@ -116,6 +116,21 @@ def get_wishlist_books(
         )
     ).all()
 
+    request_ids = [b.id for b in book_requests if b.id]
+    jobs: dict[uuid.UUID, DownloadJob] = {}
+    if request_ids:
+        all_jobs = session.exec(
+            select(DownloadJob)
+            .where(col(DownloadJob.request_id).in_(request_ids))
+            .order_by(desc(DownloadJob.created_at))
+        ).all()
+        seen: set[uuid.UUID] = set()
+        for j in all_jobs:
+            if j.request_id in seen:
+                continue
+            jobs[j.request_id] = j
+            seen.add(j.request_id)
+
     # group by asin and aggregate all usernames
     usernames: dict[str, list[str]] = defaultdict(list)
     distinct_books: dict[str, BookRequest] = {}
@@ -132,6 +147,19 @@ def get_wishlist_books(
         b = BookWishlistResult.model_validate(book)
         b.requested_by = usernames[asin]
         b.mam_unavailable = getattr(book, "mam_unavailable", False)
+        job = jobs.get(book.id) if hasattr(book, "id") else None
+        if b.downloaded:
+            b.pipeline_status = "completed"
+            b.pipeline_message = "Delivered to library"
+        elif job:
+            b.pipeline_status = job.status.value if hasattr(job.status, "value") else str(job.status)
+            b.pipeline_message = job.message or ""
+        elif b.mam_unavailable and book.mam_last_check:
+            b.pipeline_status = "no_results"
+            b.pipeline_message = f"No MAM results (last check {book.mam_last_check:%Y-%m-%d})"
+        else:
+            b.pipeline_status = "pending"
+            b.pipeline_message = "Awaiting MAM search/queue"
         if b.downloaded:
             downloaded.append(b)
         else:
