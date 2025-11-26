@@ -121,7 +121,7 @@
                   {% else %}
                     <a class="btn btn-square"
                        title="Browse on MAM"
-                       href="{{ base_url }}/search/browse/mam?{% if book.id %}request_id={{ book.id }}&{% endif %}q={{ book.title | urlencode }}">
+                       href="{{ base_url }}/search/mam?{% if book.id %}request_id={{ book.id }}&{% endif %}q={{ book.title | urlencode }}">
                       {% include "icons/search.html" %}
                     </a>
                     <button class="btn btn-square"
