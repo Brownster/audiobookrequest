@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 from datetime import timedelta
 
 from aiohttp import ClientSession
-from sqlmodel import select, Session
+from sqlmodel import select, Session, col
 from torf import Torrent as TorfTorrent
 
 from app.util.log import logger
@@ -45,8 +45,11 @@ class DownloadManager:
         self.worker_task: Optional[asyncio.Task] = None
         self.monitor_task: Optional[asyncio.Task] = None
         self._stopping = False
+        self._postprocess_lock = asyncio.Lock()
+        self._postprocess_sweep_running = False
         self.http_session: Optional[ClientSession] = None
         self._last_mam_retry: Optional[datetime] = None
+        self._last_postprocess_sweep: Optional[datetime] = None
         
         # We'll initialize these in start()
         self.mam_client: Optional[MyAnonamouseClient] = None
@@ -273,10 +276,73 @@ class DownloadManager:
                 await asyncio.sleep(60)
                 await self._maybe_retry_unavailable()
                 await self._poll_torrents()
+                await self._maybe_finalize_seeding()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 logger.error("DownloadManager: monitor failed", error=str(exc))
+
+    async def _maybe_finalize_seeding(self):
+        """Every 15 minutes, sequentially post-process any seeding jobs that never finalized."""
+        if self._stopping:
+            return
+        now = datetime.utcnow()
+        if self._last_postprocess_sweep and (now - self._last_postprocess_sweep).total_seconds() < 900:
+            return
+        if self._postprocess_sweep_running:
+            return
+        self._postprocess_sweep_running = True
+        try:
+            with open_session() as session:
+                # Refresh client if missing
+                if not self.torrent_client:
+                    container = SessionContainer(session=session, client_session=self.http_session)
+                    mam_config_def = await MamIndexer.get_configurations(container)
+                    try:
+                        config = cast(ValuedMamConfigurations, create_valued_configuration(mam_config_def, session, check_required=False))
+                        client_type = config.download_client or "transmission"
+                        if client_type == "qbittorrent":
+                            self.torrent_client = QbitClient(
+                                self.http_session,
+                                config.qbittorrent_url or "http://qbittorrent:8080",
+                                config.qbittorrent_username or "",
+                                config.qbittorrent_password or "",
+                            )
+                        else:
+                            self.torrent_client = TransmissionClient(
+                                self.http_session,
+                                config.transmission_url or "http://transmission:9091/transmission/rpc",
+                                config.transmission_username,
+                                config.transmission_password,
+                            )
+                    except Exception:
+                        pass
+
+                # Grab seeding/processing jobs with no destination yet
+                jobs = session.exec(
+                    select(DownloadJob).where(
+                        DownloadJob.status.in_([DownloadJobStatus.seeding, DownloadJobStatus.processing]),
+                        DownloadJob.destination_path == None,  # noqa: E711
+                    )
+                    .order_by(DownloadJob.created_at.asc())
+                ).all()
+                if not jobs or not self.torrent_client:
+                    return
+
+                for job in jobs:
+                    if not job.transmission_hash:
+                        continue
+                    try:
+                        torrents = await self.torrent_client.get_torrents([job.transmission_hash])
+                        snapshot = torrents.get(job.transmission_hash) or next(iter(torrents.values()), {})
+                        if not snapshot:
+                            continue
+                        await self._finalize_job(str(job.id), snapshot)
+                    except Exception as exc:
+                        logger.warning("DownloadManager: postprocess sweep skipped job", job_id=str(job.id), error=str(exc))
+        finally:
+            self._last_postprocess_sweep = datetime.utcnow()
+            self._postprocess_sweep_running = False
 
     async def _maybe_retry_unavailable(self):
         """Periodically retry MAM searches for wishlist items previously marked unavailable."""
@@ -308,6 +374,7 @@ class DownloadManager:
                 select(BookRequest).where(
                     BookRequest.downloaded == False,  # noqa: E712
                     BookRequest.mam_unavailable == True,  # noqa: E712
+                    col(BookRequest.user_username).is_not(None),
                     (BookRequest.mam_last_check == None)  # noqa: E711
                     | (BookRequest.mam_last_check <= cutoff),
                 )
@@ -510,114 +577,115 @@ class DownloadManager:
                     asyncio.create_task(self._finalize_job(str(job.id), t_info))
 
     async def _finalize_job(self, job_id: str, torrent_snapshot: dict):
-        job_uuid = self._coerce_uuid(job_id)
-        if job_uuid is None:
-            return
-        with open_session() as session:
-            job = session.get(DownloadJob, job_uuid)
-            if not job:
+        async with self._postprocess_lock:
+            job_uuid = self._coerce_uuid(job_id)
+            if job_uuid is None:
                 return
-            
-            request = session.get(BookRequest, job.request_id) if job.request_id else None
-            if not request:
-                logger.error("Cannot finalize job without request", job_id=job_id)
-                return
+            with open_session() as session:
+                job = session.get(DownloadJob, job_uuid)
+                if not job:
+                    return
+                
+                request = session.get(BookRequest, job.request_id) if job.request_id else None
+                if not request:
+                    logger.error("Cannot finalize job without request", job_id=job_id)
+                    return
 
-            # Reload settings so we can apply any path mapping
-            container = SessionContainer(session=session, client_session=self.http_session)
-            mam_config_def = await MamIndexer.get_configurations(container)
-            config = cast(
-                ValuedMamConfigurations,
-                create_valued_configuration(mam_config_def, session, check_required=False),
-            )
-
-            # Normalize the snapshot so the postprocessor can find the files locally
-            snapshot = dict(torrent_snapshot)
-            download_dir = (
-                snapshot.get("downloadDir")
-                or snapshot.get("save_path")
-                or snapshot.get("savepath")
-            )
-            if not download_dir:
-                content_path = snapshot.get("content_path")
-                if content_path:
-                    download_dir = str(Path(content_path).parent)
-
-            remote_prefix = (config.qbittorrent_remote_path_prefix or "").rstrip("/")
-            local_prefix = (config.qbittorrent_local_path_prefix or "").rstrip("/")
-
-            # Fallback to global qB settings if MAM-specific prefixes are unset
-            if not remote_prefix:
-                remote_prefix = (indexer_configuration_cache.get(session, "qbittorrent_remote_path_prefix") or "").rstrip("/")
-            if not local_prefix:
-                local_prefix = (indexer_configuration_cache.get(session, "qbittorrent_local_path_prefix") or "").rstrip("/")
-            if (
-                download_dir
-                and remote_prefix
-                and local_prefix
-                and str(download_dir).startswith(remote_prefix)
-            ):
-                suffix = str(download_dir)[len(remote_prefix):] if remote_prefix != "/" else str(download_dir)
-                download_dir = str(Path(local_prefix) / suffix.lstrip("/"))
-                logger.info(
-                    "DownloadManager: mapped remote path",
-                    remote_prefix=remote_prefix,
-                    local_prefix=local_prefix,
-                    mapped_path=download_dir,
+                # Reload settings so we can apply any path mapping
+                container = SessionContainer(session=session, client_session=self.http_session)
+                mam_config_def = await MamIndexer.get_configurations(container)
+                config = cast(
+                    ValuedMamConfigurations,
+                    create_valued_configuration(mam_config_def, session, check_required=False),
                 )
 
-            if download_dir:
-                snapshot["downloadDir"] = download_dir
+                # Normalize the snapshot so the postprocessor can find the files locally
+                snapshot = dict(torrent_snapshot)
+                download_dir = (
+                    snapshot.get("downloadDir")
+                    or snapshot.get("save_path")
+                    or snapshot.get("savepath")
+                )
+                if not download_dir:
+                    content_path = snapshot.get("content_path")
+                    if content_path:
+                        download_dir = str(Path(content_path).parent)
 
-            # qBittorrent needs an extra call to get file list
-            if isinstance(self.torrent_client, QbitClient):
+                remote_prefix = (config.qbittorrent_remote_path_prefix or "").rstrip("/")
+                local_prefix = (config.qbittorrent_local_path_prefix or "").rstrip("/")
+
+                # Fallback to global qB settings if MAM-specific prefixes are unset
+                if not remote_prefix:
+                    remote_prefix = (indexer_configuration_cache.get(session, "qbittorrent_remote_path_prefix") or "").rstrip("/")
+                if not local_prefix:
+                    local_prefix = (indexer_configuration_cache.get(session, "qbittorrent_local_path_prefix") or "").rstrip("/")
+                if (
+                    download_dir
+                    and remote_prefix
+                    and local_prefix
+                    and str(download_dir).startswith(remote_prefix)
+                ):
+                    suffix = str(download_dir)[len(remote_prefix):] if remote_prefix != "/" else str(download_dir)
+                    download_dir = str(Path(local_prefix) / suffix.lstrip("/"))
+                    logger.info(
+                        "DownloadManager: mapped remote path",
+                        remote_prefix=remote_prefix,
+                        local_prefix=local_prefix,
+                        mapped_path=download_dir,
+                    )
+
+                if download_dir:
+                    snapshot["downloadDir"] = download_dir
+
+                # qBittorrent needs an extra call to get file list
+                if isinstance(self.torrent_client, QbitClient):
+                    try:
+                        snapshot["files"] = await self.torrent_client.list_files(job.transmission_hash)
+                        if snapshot["files"]:
+                            # Use the common prefix of file paths as name fallback
+                            names = [Path(f.get("name", "")) for f in snapshot["files"] if isinstance(f.get("name"), str)]
+                            if names:
+                                # First part of the first path is the torrent root folder
+                                root_part = names[0].parts[0] if names[0].parts else None
+                                if root_part:
+                                    snapshot.setdefault("name", root_part)
+                    except Exception as exc:
+                        logger.warning(
+                            "DownloadManager: unable to fetch qBittorrent file list",
+                            error=str(exc),
+                            hash=job.transmission_hash,
+                        )
+
                 try:
-                    snapshot["files"] = await self.torrent_client.list_files(job.transmission_hash)
-                    if snapshot["files"]:
-                        # Use the common prefix of file paths as name fallback
-                        names = [Path(f.get("name", "")) for f in snapshot["files"] if isinstance(f.get("name"), str)]
-                        if names:
-                            # First part of the first path is the torrent root folder
-                            root_part = names[0].parts[0] if names[0].parts else None
-                            if root_part:
-                                snapshot.setdefault("name", root_part)
+                    if not snapshot.get("downloadDir"):
+                        raise PostProcessingError(
+                            "No download path reported by the torrent client. Set the qB Remote/Local path mapping in Settings ▸ MAM so files can be located."
+                        )
+                    destination = await asyncio.wait_for(
+                        self.postprocessor.process(str(job.id), request, snapshot),
+                        timeout=30 * 60,  # 30 minutes
+                    )
+                    # Keep status as seeding to reflect ongoing seeding on private trackers
+                    job.status = DownloadJobStatus.seeding
+                    job.destination_path = str(destination)
+                    job.message = f"Processed -> {destination}"
+                    job.completed_at = datetime.utcnow()
+                    session.add(job)
+                    session.commit()
+                    
+                    # Cleanup torrent
+                    # await self.torrent_client.remove_torrent(job.transmission_hash)
+                    
+                except asyncio.TimeoutError:
+                    job.status = DownloadJobStatus.failed
+                    job.message = "Post-processing timed out"
+                    session.add(job)
+                    session.commit()
                 except Exception as exc:
-                    logger.warning(
-                        "DownloadManager: unable to fetch qBittorrent file list",
-                        error=str(exc),
-                        hash=job.transmission_hash,
-                    )
-
-            try:
-                if not snapshot.get("downloadDir"):
-                    raise PostProcessingError(
-                        "No download path reported by the torrent client. Set the qB Remote/Local path mapping in Settings ▸ MAM so files can be located."
-                    )
-                destination = await asyncio.wait_for(
-                    self.postprocessor.process(str(job.id), request, snapshot),
-                    timeout=30 * 60,  # 30 minutes
-                )
-                # Keep status as seeding to reflect ongoing seeding on private trackers
-                job.status = DownloadJobStatus.seeding
-                job.destination_path = str(destination)
-                job.message = f"Processed -> {destination}"
-                job.completed_at = datetime.utcnow()
-                session.add(job)
-                session.commit()
-                
-                # Cleanup torrent
-                # await self.torrent_client.remove_torrent(job.transmission_hash)
-                
-            except asyncio.TimeoutError:
-                job.status = DownloadJobStatus.failed
-                job.message = "Post-processing timed out"
-                session.add(job)
-                session.commit()
-            except Exception as exc:
-                job.status = DownloadJobStatus.failed
-                job.message = f"Post-processing failed: {exc}"
-                session.add(job)
-                session.commit()
+                    job.status = DownloadJobStatus.failed
+                    job.message = f"Post-processing failed: {exc}"
+                    session.add(job)
+                    session.commit()
 
     async def reprocess_job(self, job_id: str) -> bool:
         """Manually trigger a retry. If the torrent was never added, requeue download; otherwise retry post-processing."""
