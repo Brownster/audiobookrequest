@@ -565,9 +565,17 @@ class DownloadManager:
                 snapshot["downloadDir"] = download_dir
 
             # qBittorrent needs an extra call to get file list
-            if not snapshot.get("files") and isinstance(self.torrent_client, QbitClient):
+            if isinstance(self.torrent_client, QbitClient):
                 try:
                     snapshot["files"] = await self.torrent_client.list_files(job.transmission_hash)
+                    if snapshot["files"]:
+                        # Use the common prefix of file paths as name fallback
+                        names = [Path(f.get("name", "")) for f in snapshot["files"] if isinstance(f.get("name"), str)]
+                        if names:
+                            # First part of the first path is the torrent root folder
+                            root_part = names[0].parts[0] if names[0].parts else None
+                            if root_part:
+                                snapshot.setdefault("name", root_part)
                 except Exception as exc:
                     logger.warning(
                         "DownloadManager: unable to fetch qBittorrent file list",
