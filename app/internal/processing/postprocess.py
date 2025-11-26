@@ -92,7 +92,9 @@ class PostProcessor:
         if self.enable_merge and self.ffmpeg_path:
             merged = destination.with_suffix(".m4b")
             merged.parent.mkdir(parents=True, exist_ok=True)
-            await self._merge_with_ffmpeg(audio_files, merged)
+            # Filter out cover/art files (commonly mp3+jpg pairs)
+            audio_only = [p for p in audio_files if p.suffix.lower() in AUDIO_EXTENSIONS and p.suffix.lower() != ".jpg"]
+            await self._merge_with_ffmpeg(audio_only or audio_files, merged)
             await self._finalize_metadata(merged, metadata)
             return merged
 
