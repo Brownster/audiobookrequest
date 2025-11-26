@@ -459,6 +459,14 @@ class QbitClient(AbstractTorrentClient):
             return data
         return []
 
+    async def resume(self, hash_string: str) -> None:
+        await self._ensure_auth()
+        await self._request(
+            "POST",
+            "api/v2/torrents/resume",
+            data={"hashes": hash_string},
+        )
+
     async def set_share_limits(
         self,
         hash_string: str,
