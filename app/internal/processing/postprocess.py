@@ -4,6 +4,7 @@ import asyncio
 import os
 import shutil
 import json
+import re
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -19,10 +20,11 @@ class PostProcessingError(RuntimeError):
     pass
 
 
-def _sanitize_name(name: str) -> str:
-    safe = "".join(c for c in name if c.isalnum() or c in (" ", "-", "_"))
-    safe = safe.strip().replace(" ", "_")
-    return safe or "audiobook"
+def _sanitize_component(name: str, fallback: str = "Unknown") -> str:
+    # Keep letters/numbers/spaces/dashes/apostrophes, strip the rest, collapse spaces
+    cleaned = re.sub(r"[^A-Za-z0-9\s\-\']", "", name or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or fallback
 
 
 class PostProcessor:
@@ -73,20 +75,25 @@ class PostProcessor:
         if not audio_files and download_dir.exists():
             audio_files = self._find_audio_files_recursive(download_dir)
         
-        dest_name = _sanitize_name(metadata.get("display_name") or name)
-        destination = self.output_dir / dest_name
+        safe_author = _sanitize_component((metadata.get("authors") or ["Unknown Author"])[0], "Unknown Author")
+        safe_title = _sanitize_component(metadata.get("title") or name, "Audiobook")
+        base_dir = self.output_dir / safe_author / safe_title
+        base_dir.mkdir(parents=True, exist_ok=True)
+        destination = base_dir / f"{safe_title}"
         if destination.exists():
-            destination = self.output_dir / f"{dest_name}_{str(job_id)[:8]}"
+            destination = base_dir / f"{safe_title}_{str(job_id)[:8]}"
 
         if not audio_files:
             # no audio metadata, copy entire folder/file
             await asyncio.to_thread(self._copy_any, source_path, destination)
+            await self._cleanup_tmp()
             return destination
 
         if len(audio_files) == 1:
             destination = destination.with_suffix(audio_files[0].suffix.lower())
             await asyncio.to_thread(self._copy_file, audio_files[0], destination)
             await self._finalize_metadata(destination, metadata)
+            await self._cleanup_tmp()
             return destination
 
         if self.enable_merge and self.ffmpeg_path:
@@ -96,11 +103,13 @@ class PostProcessor:
             audio_only = [p for p in audio_files if p.suffix.lower() in AUDIO_EXTENSIONS and p.suffix.lower() != ".jpg"]
             await self._merge_with_ffmpeg(audio_only or audio_files, merged)
             await self._finalize_metadata(merged, metadata)
+            await self._cleanup_tmp()
             return merged
 
         # fallback: copy directory containing files
         await asyncio.to_thread(self._copy_any, source_path, destination)
         await self._finalize_metadata(destination, metadata)
+        await self._cleanup_tmp()
         return destination
 
     def _normalize(self, value: str) -> str:
@@ -311,3 +320,12 @@ class PostProcessor:
         cover_path = self.tmp_dir / f"cover_{os.getpid()}.jpg"
         cover_path.write_bytes(data)
         return cover_path
+
+    async def _cleanup_tmp(self) -> None:
+        try:
+            for p in self.tmp_dir.glob("ffmpeg_concat_*"):
+                p.unlink(missing_ok=True)
+            for p in self.tmp_dir.glob("cover_*"):
+                p.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.debug("PostProcessor: tmp cleanup skipped", error=str(exc))
