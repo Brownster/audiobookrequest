@@ -70,6 +70,8 @@ class PostProcessor:
 
         files = torrent_snapshot.get("files", [])
         audio_files = self._gather_audio_files(download_dir, files)
+        if not audio_files and download_dir.exists():
+            audio_files = self._find_audio_files_recursive(download_dir)
         
         dest_name = _sanitize_name(metadata.get("display_name") or name)
         destination = self.output_dir / dest_name
@@ -141,6 +143,14 @@ class PostProcessor:
                 audio_paths.append(path)
         audio_paths.sort()
         return audio_paths
+
+    def _find_audio_files_recursive(self, base_dir: Path) -> List[Path]:
+        found: List[Path] = []
+        for ext in AUDIO_EXTENSIONS:
+            found.extend(base_dir.rglob(f"*{ext}"))
+        found = [p for p in found if p.is_file()]
+        found.sort()
+        return found
 
     async def _merge_with_ffmpeg(self, files: List[Path], destination: Path) -> None:
         list_file_path = self.tmp_dir / f"ffmpeg_concat_{os.getpid()}_{destination.stem}.txt"
