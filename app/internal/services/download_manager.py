@@ -452,19 +452,19 @@ class DownloadManager:
                     downloading_states = {"downloading", "stalleddl", "forceddl"}
                     uploading_states = {"uploading", "forcedup"}
                     if state_lower in downloading_states:
-                    job.status = DownloadJobStatus.downloading
-                    job.message = f"qB state: {state}"
-                elif state_lower in inactive_states:
-                    job.status = DownloadJobStatus.downloading
-                    job.message = f"qB state: {state} -> resuming"
-                    try:
-                        # Force resume if paused/stalled
-                        await self.torrent_client.resume(job.transmission_hash)
-                    except Exception as exc:
-                        logger.warning("DownloadManager: failed to resume inactive torrent", error=str(exc))
-                elif state_lower in uploading_states:
-                    job.status = DownloadJobStatus.seeding
-                    job.message = f"qB state: {state}"
+                        job.status = DownloadJobStatus.downloading
+                        job.message = f"qB state: {state}"
+                    elif state_lower in inactive_states:
+                        job.status = DownloadJobStatus.downloading
+                        job.message = f"qB state: {state} -> resuming"
+                        try:
+                            # Force resume if paused/stalled
+                            await self.torrent_client.resume(job.transmission_hash)
+                        except Exception as exc:
+                            logger.warning("DownloadManager: failed to resume inactive torrent", error=str(exc))
+                    elif state_lower in uploading_states:
+                        job.status = DownloadJobStatus.seeding
+                        job.message = f"qB state: {state}"
 
                 left_until_done = t_info.get("leftUntilDone")
                 progress = t_info.get("progress")
