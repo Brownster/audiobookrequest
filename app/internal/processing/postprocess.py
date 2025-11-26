@@ -75,7 +75,9 @@ class PostProcessor:
         if not audio_files and download_dir.exists():
             audio_files = self._find_audio_files_recursive(download_dir)
         
-        safe_author = _sanitize_component((metadata.get("authors") or ["Unknown Author"])[0], "Unknown Author")
+        authors = metadata.get("authors") or ["Unknown Author"]
+        primary_author = authors[0]
+        safe_author = _sanitize_component(primary_author, "Unknown Author")
         safe_title = _sanitize_component(metadata.get("title") or name, "Audiobook")
         base_dir = self.output_dir / safe_author / safe_title
         base_dir.mkdir(parents=True, exist_ok=True)
