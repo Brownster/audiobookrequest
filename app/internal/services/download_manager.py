@@ -553,7 +553,7 @@ class DownloadManager:
                 and str(download_dir).startswith(remote_prefix)
             ):
                 suffix = str(download_dir)[len(remote_prefix):] if remote_prefix != "/" else str(download_dir)
-                download_dir = (local_prefix + suffix).replace("//", "/")
+                download_dir = str(Path(local_prefix) / suffix.lstrip("/"))
                 logger.info(
                     "DownloadManager: mapped remote path",
                     remote_prefix=remote_prefix,

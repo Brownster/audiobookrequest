@@ -59,11 +59,11 @@ class PostProcessor:
         source_path = download_dir / name
 
         if not source_path.exists():
-            # Try to find it if the name is slightly different or if it's a single file torrent
-            # This part might need more robust logic depending on client behavior
-            raise PostProcessingError(
-                f"Source path does not exist: {source_path}. If this path lives on a remote seedbox, set qB Remote Download Path and Local Path Prefix in Settings ▸ MAM so it can be mapped locally."
-            )
+            source_path = self._find_source_fallback(download_dir, name, torrent_snapshot.get("files", []))
+            if not source_path or not source_path.exists():
+                raise PostProcessingError(
+                    f"Source path does not exist: {download_dir / name}. If this path lives on a remote seedbox, set qB Remote Download Path and Local Path Prefix in Settings ▸ MAM so it can be mapped locally."
+                )
 
         files = torrent_snapshot.get("files", [])
         audio_files = self._gather_audio_files(download_dir, files)
@@ -95,6 +95,34 @@ class PostProcessor:
         await asyncio.to_thread(self._copy_any, source_path, destination)
         await self._finalize_metadata(destination, metadata)
         return destination
+
+    def _normalize(self, value: str) -> str:
+        return "".join(c for c in value.lower() if c.isalnum())
+
+    def _find_source_fallback(self, download_dir: Path, name: str, files: list[dict]) -> Optional[Path]:
+        """
+        Attempt to locate the real source folder/file when the reported torrent name
+        doesn't match the actual path (e.g., punctuation differences).
+        """
+        # Try using the first file entry to derive the parent
+        for f in files or []:
+            rel = f.get("name")
+            if not isinstance(rel, str):
+                continue
+            parts = Path(rel).parts
+            if parts:
+                candidate = download_dir / parts[0]
+                if candidate.exists():
+                    return candidate
+        # Try fuzzy match on directory names
+        target = self._normalize(name)
+        try:
+            for entry in download_dir.iterdir():
+                if self._normalize(entry.name) == target:
+                    return entry
+        except FileNotFoundError:
+            return None
+        return None
 
     def _gather_audio_files(self, base_dir: Path, files: Iterable[dict]) -> List[Path]:
         audio_paths: List[Path] = []
