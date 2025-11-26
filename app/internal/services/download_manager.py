@@ -26,6 +26,7 @@ from app.internal.env_settings import Settings
 from app.internal.indexers.configuration import create_valued_configuration
 from app.internal.indexers.mam import MamIndexer, ValuedMamConfigurations
 from app.internal.indexers.abstract import SessionContainer
+from app.internal.indexers.configuration import indexer_configuration_cache
 
 def _ensure_directory(path_str: str) -> Path:
     path = Path(path_str)
@@ -556,7 +557,10 @@ class DownloadManager:
                     raise PostProcessingError(
                         "No download path reported by the torrent client. Set the qB Remote/Local path mapping in Settings ▸ MAM so files can be located."
                     )
-                destination = await self.postprocessor.process(str(job.id), request, snapshot)
+                destination = await asyncio.wait_for(
+                    self.postprocessor.process(str(job.id), request, snapshot),
+                    timeout=30 * 60,  # 30 minutes
+                )
                 # Keep status as seeding to reflect ongoing seeding on private trackers
                 job.status = DownloadJobStatus.seeding
                 job.destination_path = str(destination)
@@ -568,6 +572,11 @@ class DownloadManager:
                 # Cleanup torrent
                 # await self.torrent_client.remove_torrent(job.transmission_hash)
                 
+            except asyncio.TimeoutError:
+                job.status = DownloadJobStatus.failed
+                job.message = "Post-processing timed out"
+                session.add(job)
+                session.commit()
             except Exception as exc:
                 job.status = DownloadJobStatus.failed
                 job.message = f"Post-processing failed: {exc}"

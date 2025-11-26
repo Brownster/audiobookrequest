@@ -46,8 +46,8 @@ FROM python:3.12-alpine AS final
 
 WORKDIR /app
 
-# Install runtime dependencies (including C++ libraries for TailwindCSS binary)
-RUN apk add --no-cache gcompat libstdc++ libgcc
+# Install runtime dependencies (including C++ libraries for TailwindCSS binary and ffmpeg for audio merging)
+RUN apk add --no-cache gcompat libstdc++ libgcc ffmpeg
 
 # Copy binaries and dependencies from previous stages
 COPY --from=tailwind-binary /bin/tailwindcss /bin/tailwindcss
