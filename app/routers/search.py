@@ -238,6 +238,10 @@ async def add_request(
     try:
         session.add(book)
         session.commit()
+        # mark as awaiting MAM until processed
+        book.mam_unavailable = True
+        session.add(book)
+        session.commit()
     except IntegrityError:
         session.rollback()
         pass  # ignore if already exists
