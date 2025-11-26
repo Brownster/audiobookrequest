@@ -15,7 +15,7 @@ from fastapi import (
     Security,
 )
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, desc
 from sqlmodel import Session, asc, col, not_, select
 
 from app.internal.auth.authentication import ABRAuth, DetailedUser
@@ -37,11 +37,6 @@ from app.internal.notifications import (
 )
 from app.internal.audiobookshelf.config import abs_config
 from app.internal.audiobookshelf.client import abs_trigger_scan
-from app.internal.prowlarr.prowlarr import (
-    ProwlarrMisconfigured,
-    prowlarr_config,
-    start_download,
-)
 from app.internal.query import query_sources
 from app.internal.services.download_manager import DownloadManager
 from app.util.connection import get_connection
@@ -386,13 +381,6 @@ async def list_sources(
     only_body: bool = False,
     admin_user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
-    try:
-        prowlarr_config.raise_if_invalid(session)
-    except ProwlarrMisconfigured:
-        return BaseUrlRedirectResponse(
-            "/settings/prowlarr?prowlarr_misconfigured=1", status_code=302
-        )
-
     result = await query_sources(
         asin,
         session=session,
@@ -426,33 +414,9 @@ async def download_book(
     client_session: Annotated[ClientSession, Depends(get_connection)],
     admin_user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
-    try:
-        resp = await start_download(
-            session=session,
-            client_session=client_session,
-            guid=guid,
-            indexer_id=indexer_id,
-            requester=admin_user,
-            book_asin=asin,
-        )
-    except ProwlarrMisconfigured as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    if not resp.ok:
-        raise HTTPException(status_code=500, detail="Failed to start download")
-
-    book = session.exec(select(BookRequest).where(BookRequest.asin == asin)).all()
-    for b in book:
-        b.downloaded = True
-        session.add(b)
-    session.commit()
-
-    # Trigger ABS library scan in background if configured
-    if abs_config.is_valid(session):
-        # Use background tasks to not block response
-        # We can't access background_task here since this endpoint does not define it, so just fire and forget
-        await abs_trigger_scan(session, client_session)
-
-    return Response(status_code=204)
+    raise HTTPException(
+        status_code=400, detail="Indexer downloads are disabled (Prowlarr removed)."
+    )
 
 
 @router.post("/auto-download/{asin}")
@@ -463,17 +427,15 @@ async def start_auto_download(
     client_session: Annotated[ClientSession, Depends(get_connection)],
     user: DetailedUser = Security(ABRAuth(GroupEnum.trusted)),
 ):
-    download_error: Optional[str] = None
-    try:
-        await query_sources(
-            asin=asin,
-            start_auto_download=True,
-            session=session,
-            client_session=client_session,
-            requester=user,
-        )
-    except HTTPException as e:
-        download_error = e.detail
+    download_error: Optional[str] = "Indexer downloads are disabled."
+    # Still warm any caches the lightweight query_sources stub might use (no-op today).
+    await query_sources(
+        asin=asin,
+        start_auto_download=True,
+        session=session,
+        client_session=client_session,
+        requester=user,
+    )
 
     username = None if user.is_admin() else user.username
     books = get_wishlist_books(session, username)

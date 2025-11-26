@@ -41,7 +41,6 @@ from app.internal.notifications import (
     send_all_manual_notifications,
     send_all_notifications,
 )
-from app.internal.prowlarr.prowlarr import prowlarr_config
 from app.internal.query import query_sources
 from app.internal.ranking.quality import quality_config
 from app.routers.wishlist import get_wishlist_books, get_wishlist_counts
@@ -115,7 +114,7 @@ async def read_search(
     if len(results) > 0:
         books = get_already_requested(session, results, user.username)
 
-    prowlarr_configured = prowlarr_config.is_valid(session)
+    prowlarr_configured = False
 
     clear_old_book_caches(session)
     
@@ -292,7 +291,7 @@ async def add_request(
     if len(results) > 0:
         books = get_already_requested(session, results, user.username)
 
-    prowlarr_configured = prowlarr_config.is_valid(session)
+    prowlarr_configured = False
     
     # Get recommendations if no search term is provided
     recommendations = None

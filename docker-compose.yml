@@ -6,14 +6,17 @@ services:
         - VERSION=local
     volumes:
       - ./config:/config
-      # Optional: map media paths used by torrent clients and Audiobookshelf
-      # - /path/on/host/torrents:/downloads
-      # - /path/on/host/audiobooks:/audiobooks
-      # - /path/on/host/watch:/watch
+      # qBittorrent / seedbox download path (so post-processing can read the files)
+      - /path/on/host/torrents:/downloads
+      # Final audiobook library location (ABR_APP__DOWNLOAD_DIR should point here)
+      - /path/on/host/audiobooks:/audiobooks
+      # Optional watch/import directory if you use one
+      - /path/on/host/watch:/watch
     ports:
       - "8012:8000"
     environment:
       - ABR_APP__PORT=8000
+      - ABR_APP__DOWNLOAD_DIR=/audiobooks
       - ABR_DB__USE_POSTGRES=true
       - ABR_DB__POSTGRES_HOST=psql
       - ABR_DB__POSTGRES_PORT=5432
