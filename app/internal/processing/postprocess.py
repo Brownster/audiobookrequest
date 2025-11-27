@@ -187,7 +187,7 @@ class PostProcessor:
             "-i",
             str(list_file_path),
             "-map",
-            "0:a",
+            "0:a:0",
         ]
         if is_mp3_out:
             cmd += ["-c:a", "copy", "-vn", "-f", "mp3"]
