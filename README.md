@@ -10,6 +10,7 @@ This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is
 <img width="1879" height="569" alt="image" src="https://github.com/user-attachments/assets/e0d94379-8a17-4089-adfe-1eff583fa855" />
 
 <img width="1879" height="569" alt="image" src="https://github.com/user-attachments/assets/973cbc61-1ea8-48c6-8fab-019a25e3ab71" />
+<img width="1910" height="495" alt="image" src="https://github.com/user-attachments/assets/7868ce5c-a3d1-4340-9ba3-93336704afa9" />
 
 <img width="1887" height="612" alt="image" src="https://github.com/user-attachments/assets/59086fa6-b693-4016-9d2b-363c6fff395c" />
 
