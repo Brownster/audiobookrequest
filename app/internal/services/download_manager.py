@@ -588,10 +588,9 @@ class DownloadManager:
                 # Determine completion
                 state = t_info.get("state") or t_info.get("status") or ""
                 state_lower = str(state).lower()
-                is_inactive_state = False
                 if state:
                     # Set a more accurate message/status based on qBittorrent state
-                    inactive_states = {"pausedup", "pauseup", "pauseddl", "queuedup", "queueddl", "stalledup", "checkingup"}
+                    inactive_states = {"pausedup", "pauseup", "pauseddl", "queuedup", "queueddl", "stalledup", "checkingup", "stalledup"}
                     downloading_states = {"downloading", "stalleddl", "forceddl"}
                     uploading_states = {"uploading", "forcedup"}
                     if state_lower in downloading_states:
@@ -600,10 +599,12 @@ class DownloadManager:
                     elif state_lower in inactive_states:
                         job.status = DownloadJobStatus.downloading
                         job.message = f"qB state: {state} -> resuming"
-                        is_inactive_state = True
                         try:
                             # Force resume if paused/stalled
                             await self.torrent_client.resume(job.transmission_hash)
+                            # For qB, also try to force-start to avoid inactive seeding
+                            if isinstance(self.torrent_client, QbitClient):
+                                await self.torrent_client.force_start(job.transmission_hash)
                         except Exception as exc:
                             logger.warning("DownloadManager: failed to resume inactive torrent", error=str(exc))
                     elif state_lower in uploading_states:
