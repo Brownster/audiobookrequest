@@ -508,7 +508,6 @@ async def read_mam_search(
     session: Annotated[Session, Depends(get_session)],
     query: Annotated[Optional[str], Query(alias="q")] = None,
     request_id: Annotated[Optional[uuid.UUID], Query()] = None,
-    args: Annotated[list[str], Query()] = [],
     user: DetailedUser = Security(ABRAuth()),
 ):
     results = []
@@ -692,7 +691,6 @@ async def browse_mam(
     session: Annotated[Session, Depends(get_session)],
     request_id: Annotated[Optional[str], Query()] = None,
     q: Annotated[Optional[str], Query()] = None,
-    args: Annotated[list[str], Query()] = [],
     category: Annotated[Optional[int], Query()] = None,
     user: DetailedUser = Security(ABRAuth()),
 ):

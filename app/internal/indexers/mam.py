@@ -184,7 +184,7 @@ class MamIndexer(AbstractIndexer[MamConfigurations]):
         source: ProwlarrSource,
         container: SessionContainer,
     ):
-        mam_id = source.guid.split("-")[-1]
+        mam_id = source.guid.split("-")[-1].split("/")[-1]
         result = self.results.get(mam_id)
         if result is None:
             return

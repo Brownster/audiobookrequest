@@ -445,6 +445,15 @@ class QbitClient(AbstractTorrentClient):
         )
         logger.info("qBittorrent: torrent removed", hash=hash_string)
 
+    async def force_start(self, hash_string: str, value: bool = True) -> None:
+        """Force start or clear force-start on a torrent."""
+        await self._ensure_auth()
+        await self._request(
+            "POST",
+            "api/v2/torrents/setForceStart",
+            data={"hashes": hash_string, "value": "true" if value else "false"},
+        )
+
     async def test_connection(self) -> None:
         await self._ensure_capabilities()
         await self._ensure_auth()

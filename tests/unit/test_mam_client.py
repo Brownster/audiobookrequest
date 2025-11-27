@@ -89,7 +89,9 @@ async def test_download_torrent_success(mam_client):
 @pytest.mark.asyncio
 async def test_download_torrent_auth_error(mam_client):
     with aioresponses() as m:
-        m.get(re.compile(r"https://www\.myanonamouse\.net/torrents\.php.*"), status=403)
-        
+        m.get("https://www.myanonamouse.net/torrents.php?action=download&id=123", status=403)
+        m.get("https://www.myanonamouse.net/tor/download.php?id=123", status=403)
+        m.get("https://www.myanonamouse.net/tor/download.php?tid=123", status=403)
+
         with pytest.raises(AuthenticationError):
             await mam_client.download_torrent("123")

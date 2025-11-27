@@ -275,7 +275,8 @@ class PostProcessor:
             return
         tags = metadata.get("ffmpeg_tags") or {}
         cover_path = await self._download_cover(metadata.get("cover_url"))
-        temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+        ext = file_path.suffix
+        temp_path = file_path.with_name(file_path.stem + ".tmp" + ext)
         cmd = [self.ffmpeg_path, "-y", "-i", str(file_path)]
         if cover_path:
             cmd += [
