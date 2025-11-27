@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from app.internal.models import User, GroupEnum
 from app.internal.auth.authentication import DetailedUser
@@ -15,9 +15,8 @@ mock_user = DetailedUser(
 
 @pytest.fixture
 def authenticated_client(client):
-    # Patch ABRAuth.__call__ to return the mock user
-    with patch("app.internal.auth.authentication.ABRAuth.__call__", return_value=mock_user):
-        yield client
+    # Auth is already overridden to a mock admin in conftest
+    yield client
 
 @pytest.mark.asyncio
 async def test_browse_mam_mock(authenticated_client):
