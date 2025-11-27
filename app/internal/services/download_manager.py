@@ -50,6 +50,7 @@ class DownloadManager:
         self.http_session: Optional[ClientSession] = None
         self._last_mam_retry: Optional[datetime] = None
         self._last_postprocess_sweep: Optional[datetime] = None
+        self._last_seed_cleanup: Optional[datetime] = None
         
         # We'll initialize these in start()
         self.mam_client: Optional[MyAnonamouseClient] = None
@@ -88,7 +89,10 @@ class DownloadManager:
         # Preload settings and test torrent client connection if possible
         try:
             with open_session() as session:
-                container = SessionContainer(session=session, client_session=self.http_session)
+                container = SessionContainer(
+                    session=session,
+                    client_session=self.http_session or ClientSession(),
+                )
                 mam_config_def = await MamIndexer.get_configurations(container)
                 config = cast(ValuedMamConfigurations, create_valued_configuration(mam_config_def, session, check_required=False))
                 client_type = config.download_client or "transmission"
@@ -277,6 +281,7 @@ class DownloadManager:
                 await self._maybe_retry_unavailable()
                 await self._poll_torrents()
                 await self._maybe_finalize_seeding()
+                await self._maybe_cleanup_seeded()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -343,6 +348,76 @@ class DownloadManager:
         finally:
             self._last_postprocess_sweep = datetime.utcnow()
             self._postprocess_sweep_running = False
+
+    async def _maybe_cleanup_seeded(self):
+        """Every 15 minutes, remove torrents that have passed the seed target after processing."""
+        if self._stopping:
+            return
+        now = datetime.utcnow()
+        if self._last_seed_cleanup and (now - self._last_seed_cleanup).total_seconds() < 900:
+            return
+        self._last_seed_cleanup = now
+
+        with open_session() as session:
+            # Ensure client exists
+            if not self.torrent_client:
+                container = SessionContainer(session=session, client_session=self.http_session)
+                try:
+                    mam_config_def = await MamIndexer.get_configurations(container)
+                    config = cast(ValuedMamConfigurations, create_valued_configuration(mam_config_def, session, check_required=False))
+                    client_type = config.download_client or "transmission"
+                    if client_type == "qbittorrent":
+                        self.torrent_client = QbitClient(
+                            self.http_session,
+                            config.qbittorrent_url or "http://qbittorrent:8080",
+                            config.qbittorrent_username or "",
+                            config.qbittorrent_password or "",
+                        )
+                    else:
+                        self.torrent_client = TransmissionClient(
+                            self.http_session,
+                            config.transmission_url or "http://transmission:9091/transmission/rpc",
+                            config.transmission_username,
+                            config.transmission_password,
+                        )
+                except Exception:
+                    return
+
+            # Find processed jobs with a destination that have exceeded seed target hours
+            jobs = session.exec(
+                select(DownloadJob).where(
+                    DownloadJob.status == DownloadJobStatus.seeding,
+                    DownloadJob.destination_path.is_not(None),
+                    DownloadJob.completed_at.is_not(None),
+                )
+            ).all()
+            for job in jobs:
+                try:
+                    if not job.completed_at:
+                        continue
+                    seed_target = 0
+                    if job.seed_configuration:
+                        cfg = TorrentSeedConfiguration.from_record(job.seed_configuration)
+                        if cfg:
+                            seed_target = cfg.required_seed_seconds
+                    # Fall back to 0 if not set
+                    if seed_target <= 0:
+                        continue
+                    elapsed = (datetime.utcnow() - job.completed_at).total_seconds()
+                    if elapsed < seed_target:
+                        continue
+                    if not job.transmission_hash:
+                        continue
+                    # Remove torrent but keep data
+                    try:
+                        await self.torrent_client.remove_torrent(job.transmission_hash, delete_data=False)
+                        job.message = "Seed target met; torrent removed"
+                        session.add(job)
+                        session.commit()
+                    except Exception as exc:
+                        logger.warning("Seed cleanup: failed to remove torrent", job_id=str(job.id), error=str(exc))
+                except Exception as exc:
+                    logger.debug("Seed cleanup: skipped job", job_id=str(job.id) if job.id else "", error=str(exc))
 
     async def _maybe_retry_unavailable(self):
         """Periodically retry MAM searches for wishlist items previously marked unavailable."""
