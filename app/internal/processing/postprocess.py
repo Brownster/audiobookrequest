@@ -169,8 +169,9 @@ class PostProcessor:
         list_file_path = self.tmp_dir / f"ffmpeg_concat_{os.getpid()}_{destination.stem}.txt"
         with list_file_path.open("w", encoding="utf-8") as fh:
             for file in files:
-                # ffmpeg requires safe paths
-                fh.write(f"file '{file.as_posix()}'\n")
+                # ffmpeg concat requires escaping single quotes
+                safe_path = file.as_posix().replace("'", r"'\''")
+                fh.write(f"file '{safe_path}'\n")
 
         cmd = [
             self.ffmpeg_path,
@@ -180,6 +181,8 @@ class PostProcessor:
             "0",
             "-i",
             str(list_file_path),
+            "-map",
+            "0:a",
             "-c",
             "copy",
             str(destination),

@@ -5,15 +5,17 @@ services:
       args:
         - VERSION=local
     volumes:
-      - ./config:/config
-      # Optional: map media paths used by torrent clients and Audiobookshelf
-      # - /path/on/host/torrents:/downloads
-      # - /path/on/host/audiobooks:/audiobooks
-      # - /path/on/host/watch:/watch
+      - ./config:/config                # ABR config + local .env (env file is optional)
+      - ./config/database:/config/database  # Keeps SQLite DB inside /config/database
+      - /path/on/host/torrents:/downloads   # qB/seedbox download root (required for post-processing)
+      - /path/on/host/processing:/processing # Optional: tmp/intermediate processing (bind if you want it off-root)
+      - /path/on/host/audiobooks:/audiobooks # Final audiobook library (ABS watch/library path)
     ports:
       - "8012:8000"
     environment:
       - ABR_APP__PORT=8000
+      - ABR_APP__DOWNLOAD_DIR=/audiobooks
+      - ABR_APP__CONFIG_DIR=/config
       - ABR_DB__USE_POSTGRES=true
       - ABR_DB__POSTGRES_HOST=psql
       - ABR_DB__POSTGRES_PORT=5432

@@ -23,6 +23,9 @@ async def read_ai_settings(
 ):
     endpoint = ai_config.get_endpoint(session) or ""
     model = ai_config.get_model(session) or ""
+    provider = ai_config.get_provider(session) or "ollama"
+    api_key = ai_config.get_api_key(session) or ""
+    cache_ttl_days = ai_config.get_cache_ttl_days(session)
     return template_response(
         "settings_page/ai.html",
         request,
@@ -31,27 +34,30 @@ async def read_ai_settings(
             "page": "ai",
             "ai_endpoint": endpoint,
             "ai_model": model,
+            "ai_provider": provider,
+            "ai_api_key": api_key,
+            "ai_cache_ttl_days": cache_ttl_days,
         },
     )
 
 
-@router.put("/endpoint")
-def update_ai_endpoint(
+@router.post("/config")
+def update_ai_config(
+    session: Annotated[Session, Depends(get_session)],
+    provider: Annotated[str, Form(alias="provider")],
     endpoint: Annotated[str, Form(alias="endpoint")],
-    session: Annotated[Session, Depends(get_session)],
-    admin_user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
-):
-    ai_config.set_endpoint(session, endpoint)
-    return Response(status_code=204, headers={"HX-Refresh": "true"})
-
-
-@router.put("/model")
-def update_ai_model(
     model: Annotated[str, Form(alias="model")],
-    session: Annotated[Session, Depends(get_session)],
+    api_key: Annotated[str | None, Form(alias="api_key")] = None,
+    cache_ttl_days: Annotated[int | None, Form(alias="cache_ttl_days")] = None,
     admin_user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
+    ai_config.set_provider(session, provider.strip() or "ollama")
+    ai_config.set_endpoint(session, endpoint.strip())
     ai_config.set_model(session, model)
+    if api_key is not None:
+        ai_config.set_api_key(session, api_key.strip())
+    if cache_ttl_days is not None:
+        ai_config.set_cache_ttl_days(session, cache_ttl_days)
     return Response(status_code=204, headers={"HX-Refresh": "true"})
 
 
@@ -62,62 +68,74 @@ async def test_ai_connection(
     client_session: Annotated[ClientSession, Depends(get_connection)],
     admin_user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
-    """Attempt to contact the Ollama endpoint and verify model presence. Returns a tiny HTML snippet suitable for HTMX target."""
+    """Attempt to contact the configured provider and verify availability. Returns a tiny HTML snippet suitable for HTMX target."""
     from fastapi import Response as FastAPIResponse
 
+    provider = ai_config.get_provider(session)
     endpoint = ai_config.get_endpoint(session)
     model = ai_config.get_model(session)
+    api_key = ai_config.get_api_key(session)
     status: str
     detail: str = ""
     ok = False
-    if not endpoint or not model:
+    if not endpoint or not model or (provider == "openai" and not api_key):
         status = "not_configured"
-        detail = "Endpoint or model not set."
+        detail = "Endpoint or model not set (and API key for OpenAI)."
     else:
-        # Try to list tags (models)
-        try:
-            async with client_session.get(f"{endpoint}/api/tags", timeout=10) as resp:
-                if resp.status == 200:
+        if provider == "openai":
+            try:
+                url = f"{endpoint}/v1/chat/completions"
+                body = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": "Return JSON: {\"ping\":\"pong\"}"},
+                    ],
+                    "response_format": {"type": "json_object"},
+                }
+                headers = {"Authorization": f"Bearer {api_key}"}
+                async with client_session.post(url, json=body, headers=headers, timeout=10) as resp:
                     data = await resp.json(content_type=None)
-                    tags = [t.get("name") for t in data.get("models", [])] if isinstance(data, dict) else []
-                    if model in (tags or []):
+                    content = ""
+                    if isinstance(data, dict):
+                        try:
+                            content = data["choices"][0]["message"]["content"]
+                        except Exception:
+                            content = ""
+                    if resp.status == 200 and "pong" in content:
                         ok = True
                         status = "ok"
-                        detail = f"Model '{model}' is available."
+                        detail = "OpenAI chat completion succeeded."
                     else:
-                        ok = False
-                        status = "model_missing"
-                        detail = f"Model '{model}' not found among available models."
-                else:
-                    ok = False
-                    status = "unreachable"
-                    detail = f"Tags endpoint returned status {resp.status}."
-        except Exception as e:
-            ok = False
-            status = "unreachable"
-            detail = f"Failed to reach endpoint: {e}"
-
-        # Optional: quick generate sanity check
-        if ok:
-            try:
-                body = {"model": model, "prompt": "Return JSON: {\"ping\":\"pong\"}", "format": "json", "stream": False}
-                async with client_session.post(f"{endpoint}/api/generate", json=body, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        if isinstance(data, dict) and data.get("response"):
-                            ok = True
-                        else:
-                            ok = False
-                            status = "generate_failed"
-                            detail = "Generate returned unexpected payload."
-                    else:
-                        ok = False
                         status = "generate_failed"
-                        detail = f"Generate returned status {resp.status}."
+                        detail = f"OpenAI returned {resp.status}: {data}"
             except Exception as e:
                 ok = False
                 status = "generate_failed"
-                detail = f"Generate failed: {e}"
+                detail = f"OpenAI call failed: {e}"
+        else:
+            # Ollama check
+            try:
+                async with client_session.get(f"{endpoint}/api/tags", timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        tags = [t.get("name") for t in data.get("models", [])] if isinstance(data, dict) else []
+                        if model in (tags or []):
+                            ok = True
+                            status = "ok"
+                            detail = f"Model '{model}' is available."
+                        else:
+                            ok = False
+                            status = "model_missing"
+                            detail = f"Model '{model}' not found among available models."
+                    else:
+                        ok = False
+                        status = "unreachable"
+                        detail = f"Tags endpoint returned status {resp.status}."
+            except Exception as e:
+                ok = False
+                status = "unreachable"
+                detail = f"Failed to reach endpoint: {e}"
 
     # Decide alert style based on status
     if ok:

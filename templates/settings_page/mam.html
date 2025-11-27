@@ -3,7 +3,8 @@
   <div class="space-y-4">
     <div>
       <h1 class="text-2xl font-bold">MAM Settings</h1>
-      <p class="text-sm opacity-70">Configure MyAnonamouse session and download client settings used for MAM browsing/search and downloads.</p>
+      <p class="text-sm opacity-70">Configure MyAnonamouse session used for MAM browsing/search and downloads.</p>
+      <p class="text-sm opacity-70">qBittorrent connection, seeding targets, and path mappings are now under the <strong>qBittorrent</strong> tab.</p>
     </div>
     <form class="space-y-4"
           hx-post="{{ base_url }}/settings/mam"
@@ -15,104 +16,6 @@
                class="input input-bordered w-full"
                value="{{ values.mam_session_id }}"
                required>
-      </div>
-      <div class="form-control">
-        <label class="label"><span class="label-text font-semibold">Download Client</span></label>
-        <select name="download_client" class="select select-bordered w-full">
-          <option value="transmission" {% if values.download_client == "transmission" %}selected{% endif %}>Transmission</option>
-          <option value="qbittorrent" {% if values.download_client == "qbittorrent" %}selected{% endif %}>qBittorrent</option>
-        </select>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">Transmission URL</span></label>
-          <input type="text"
-                 name="transmission_url"
-                 class="input input-bordered w-full"
-                 value="{{ values.transmission_url }}"
-                 placeholder="http://transmission:9091/transmission/rpc">
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">Transmission Username</span></label>
-          <input type="text"
-                 name="transmission_username"
-                 class="input input-bordered w-full"
-                 value="{{ values.transmission_username }}">
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">Transmission Password</span></label>
-          <input type="password"
-                 name="transmission_password"
-                 class="input input-bordered w-full"
-                 value="{{ values.transmission_password }}">
-        </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">qBittorrent URL</span></label>
-          <input type="text"
-                 name="qbittorrent_url"
-                 class="input input-bordered w-full"
-                 value="{{ values.qbittorrent_url }}"
-                 placeholder="http://qbittorrent:8080">
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">qBittorrent Username</span></label>
-          <input type="text"
-                 name="qbittorrent_username"
-                 class="input input-bordered w-full"
-                 value="{{ values.qbittorrent_username }}">
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">qBittorrent Password</span></label>
-          <input type="password"
-                 name="qbittorrent_password"
-                 class="input input-bordered w-full"
-                 value="{{ values.qbittorrent_password }}">
-        </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">Seed Target (hours)</span></label>
-          <input type="number"
-                 name="seed_target_hours"
-                 class="input input-bordered w-full"
-                 value="{{ values.seed_target_hours or 72 }}">
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">qB Ratio Limit (optional)</span></label>
-          <input type="number"
-                 step="0.1"
-                 name="qbittorrent_seed_ratio"
-                 class="input input-bordered w-full"
-                 value="{{ values.qbittorrent_seed_ratio }}">
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">qB Seed Time (minutes, optional)</span></label>
-          <input type="number"
-                 name="qbittorrent_seed_time"
-                 class="input input-bordered w-full"
-                 value="{{ values.qbittorrent_seed_time }}">
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">qB Remote Download Path</span></label>
-          <input type="text"
-                 name="qbittorrent_remote_path_prefix"
-                 class="input input-bordered w-full"
-                 placeholder="/downloads"
-                 value="{{ values.qbittorrent_remote_path_prefix }}">
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text font-semibold">qB Local Path Prefix</span></label>
-          <input type="text"
-                 name="qbittorrent_local_path_prefix"
-                 class="input input-bordered w-full"
-                 placeholder="/mnt/seedbox/downloads"
-                 value="{{ values.qbittorrent_local_path_prefix }}">
-        </div>
       </div>
       <div class="flex justify-end">
         <button type="submit" class="btn btn-primary">Save</button>

@@ -7,6 +7,7 @@ from app.internal.models import DownloadJob
 from app.internal.services.download_manager import DownloadManager
 from app.util.db import get_session
 from app.util.templates import template_response
+from fastapi import HTTPException
 
 
 router = APIRouter()
@@ -58,6 +59,36 @@ async def downloads_fragment(
     )
 
 
+@router.post("/downloads/{job_id}/delete")
+async def delete_download(
+    job_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    user: DetailedUser = Security(ABRAuth()),
+):
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Download job not found")
+
+    job = session.get(DownloadJob, job_uuid)
+    if not job:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    session.delete(job)
+    session.commit()
+
+    jobs = session.exec(
+        select(DownloadJob).order_by(desc(DownloadJob.created_at)).limit(100)
+    ).all()
+    serialized = [_serialize_job(j) for j in jobs]
+    return template_response(
+        "components/downloads_table.html",
+        request,
+        user,
+        {"jobs": serialized},
+    )
+
+
 @router.post("/downloads/{job_id}/reprocess")
 async def reprocess_download(
     job_id: str,
@@ -78,3 +109,4 @@ async def reprocess_download(
         user,
         {"jobs": serialized},
     )
+import uuid
