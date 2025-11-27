@@ -148,5 +148,4 @@ AudioBookRequest builds on top of a some other great tools. A big thanks goes ou
 
 - [Audimeta](https://github.com/Vito0912/AudiMeta) - Main audiobook metadata provider. Active in development and quick to fix issues.
 - [Audnexus](https://github.com/laxamentumtech/audnexus) - Backup audiobook metadata provider.
-- [Prowlarr](https://github.com/Prowlarr/Prowlarr) - Does a lot of the heavy lifting concerning searching through indexers and forwarding download requests to download clients. Saves me the ordeal of having to reimplement everything again.
 - [External Audible API](https://audible.readthedocs.io/en/latest/misc/external_api.html) - Audible exposes key API endpoints which are used to, for example, search for books.
