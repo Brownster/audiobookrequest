@@ -99,7 +99,10 @@ class PostProcessor:
             return destination
 
         if self.enable_merge and self.ffmpeg_path:
-            merged = destination.with_suffix(".m4b")
+            # If all inputs are mp3, keep mp3 container to avoid invalid mp3-in-m4b
+            all_mp3 = all(p.suffix.lower() == ".mp3" for p in audio_files)
+            merged_ext = ".mp3" if all_mp3 else ".m4b"
+            merged = destination.with_suffix(merged_ext)
             merged.parent.mkdir(parents=True, exist_ok=True)
             # Filter out cover/art files (commonly mp3+jpg pairs)
             audio_only = [p for p in audio_files if p.suffix.lower() in AUDIO_EXTENSIONS and p.suffix.lower() != ".jpg"]
@@ -173,6 +176,8 @@ class PostProcessor:
                 safe_path = file.as_posix().replace("'", r"'\''")
                 fh.write(f"file '{safe_path}'\n")
 
+        # Choose codec/container based on output suffix
+        is_mp3_out = destination.suffix.lower() == ".mp3"
         cmd = [
             self.ffmpeg_path,
             "-f",
@@ -183,10 +188,12 @@ class PostProcessor:
             str(list_file_path),
             "-map",
             "0:a",
-            "-c",
-            "copy",
-            str(destination),
         ]
+        if is_mp3_out:
+            cmd += ["-c:a", "copy", "-vn", "-f", "mp3"]
+        else:
+            cmd += ["-c", "copy"]
+        cmd.append(str(destination))
         logger.info("PostProcessor: merging audio with ffmpeg", output=str(destination))
         process = await asyncio.create_subprocess_exec(
             *cmd,
