@@ -3,6 +3,17 @@ AudiobookRequest (fork) – an end‑to‑end pipeline for Audible search, MyAno
 
 This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is the main path, and AI recommendations can use OpenAI or Ollama.
 
+<img width="1882" height="845" alt="image" src="https://github.com/user-attachments/assets/8efadf9d-afd8-4065-8a34-b60a2743804b" />
+
+<img width="1882" height="845" alt="image" src="https://github.com/user-attachments/assets/21515fb8-9421-4180-bb63-405b010c984b" />
+
+<img width="1879" height="569" alt="image" src="https://github.com/user-attachments/assets/e0d94379-8a17-4089-adfe-1eff583fa855" />
+
+<img width="1879" height="569" alt="image" src="https://github.com/user-attachments/assets/973cbc61-1ea8-48c6-8fab-019a25e3ab71" />
+
+<img width="1887" height="612" alt="image" src="https://github.com/user-attachments/assets/59086fa6-b693-4016-9d2b-363c6fff395c" />
+
+
 ## What it does
 - Audible search with region selection; “Check on MAM” buttons from search, homepage carousels, and wishlist.
 - Wishlist with pipeline status (pending → downloading → post‑processing → completed) and hourly auto‑rechecks for MAM‑unavailable items.
