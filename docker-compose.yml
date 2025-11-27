@@ -5,18 +5,17 @@ services:
       args:
         - VERSION=local
     volumes:
-      - ./config:/config
-      # qBittorrent / seedbox download path (so post-processing can read the files)
-      - /path/on/host/torrents:/downloads
-      # Final audiobook library location (ABR_APP__DOWNLOAD_DIR should point here)
-      - /path/on/host/audiobooks:/audiobooks
-      # Optional watch/import directory if you use one
-      - /path/on/host/watch:/watch
+      - ./config:/config                # ABR config + local .env (env file is optional)
+      - ./config/database:/config/database  # Keeps SQLite DB inside /config/database
+      - /path/on/host/torrents:/downloads   # qB/seedbox download root (required for post-processing)
+      - /path/on/host/processing:/processing # Optional: tmp/intermediate processing (bind if you want it off-root)
+      - /path/on/host/audiobooks:/audiobooks # Final audiobook library (ABS watch/library path)
     ports:
       - "8012:8000"
     environment:
       - ABR_APP__PORT=8000
       - ABR_APP__DOWNLOAD_DIR=/audiobooks
+      - ABR_APP__CONFIG_DIR=/config
       - ABR_DB__USE_POSTGRES=true
       - ABR_DB__POSTGRES_HOST=psql
       - ABR_DB__POSTGRES_PORT=5432

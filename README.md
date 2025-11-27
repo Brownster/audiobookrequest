@@ -20,13 +20,18 @@ This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is
      -e ABR_APP__PORT=8000 \
      -e ABR_APP__BASE_URL= \
      -e ABR_APP__DOWNLOAD_DIR=/audiobooks \
+     -e ABR_APP__CONFIG_DIR=/config \
      -v $(pwd)/config:/config \
+     -v $(pwd)/config/database:/config/database \
      -v /path/to/torrents:/downloads \
+     -v /path/to/processing:/processing \
      -v /path/to/audiobooks:/audiobooks \
      ghcr.io/brownster/audiobookrequest:latest
    ```
    - `/config` persists the DB/settings.
+   - `/config/database` keeps SQLite under /config/database (optional but tidy).
    - `/downloads` should match the qB remote download root.
+   - `/processing` (optional) for tmp/intermediate processing if you want to move it off the root FS.
    - `/audiobooks` is where finished m4b files are written (point ABS to this).
 
 2. Run migrations (once per fresh DB):
