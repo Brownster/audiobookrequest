@@ -597,14 +597,15 @@ class DownloadManager:
                         job.status = DownloadJobStatus.downloading
                         job.message = f"qB state: {state}"
                     elif state_lower in inactive_states:
-                        job.status = DownloadJobStatus.downloading
-                        job.message = f"qB state: {state} -> resuming"
+                        job.status = DownloadJobStatus.seeding
+                        job.message = f"qB state: {state} (inactive) -> force-start"
                         try:
                             # Force resume if paused/stalled
                             await self.torrent_client.resume(job.transmission_hash)
                             # For qB, also try to force-start to avoid inactive seeding
                             if isinstance(self.torrent_client, QbitClient):
                                 await self.torrent_client.force_start(job.transmission_hash)
+                            logger.info("DownloadManager: forced resume on inactive torrent", hash=job.transmission_hash, state=state)
                         except Exception as exc:
                             logger.warning("DownloadManager: failed to resume inactive torrent", error=str(exc))
                     elif state_lower in uploading_states:
