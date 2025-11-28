@@ -59,9 +59,6 @@
                        href="{{ base_url }}/search?q={{ book.title+' ' +(book.authors|join(",") ) }}"
                        class="font-bold text-primary line-clamp-4"
                        title="{{ book.title }}">{{ book.title }}</a>
-                    {% if book.mam_unavailable %}
-                      <span class="badge badge-warning w-fit mt-1">Waiting on MAM</span>
-                    {% endif %}
                     {% if book.subtitle %}
                       <span class="font-semibold line-clamp-4" title="{{ book.subtitle }}">{{ book.subtitle }}</span>
                     {% endif %}
@@ -75,20 +72,32 @@
                 <td title="{{ book.requested_by|join('\n') }}">{{ book.amount_requested }}</td>
                 <td>
                   {% set st = (book.pipeline_status or 'pending')|lower %}
-                  {% set badge = "badge-ghost" %}
-                  {% if st in ["completed"] %}{% set badge = "badge-success" %}
-                  {% elif st in ["failed","no_results"] %}{% set badge = "badge-error" %}
-                  {% elif st in ["processing","downloading","seeding","pending"] %}{% set badge = "badge-info" %}
+                  {# If waiting on MAM, override status display #}
+                  {% if book.mam_unavailable %}
+                    <div class="flex flex-col gap-1">
+                      <span class="badge badge-warning gap-1">MAM Pending</span>
+                      <span class="text-[0.65rem] opacity-70">Not available yet</span>
+                    </div>
+                  {% else %}
+                    {% set badge = "badge-ghost" %}
+                    {% set display_status = st %}
+                    {% if st in ["completed"] %}
+                      {% set badge = "badge-success" %}
+                    {% elif st == "no_results" %}
+                      {% set badge = "badge-error" %}
+                      {% set display_status = "Not Found" %}
+                    {% elif st == "failed" %}
+                      {% set badge = "badge-error" %}
+                    {% elif st in ["processing","downloading","seeding","pending"] %}
+                      {% set badge = "badge-info" %}
+                    {% endif %}
+                    <div class="flex flex-col gap-1">
+                      <span class="badge {{ badge }} gap-1 capitalize">{{ display_status }}</span>
+                      {% if book.pipeline_message %}
+                        <span class="text-[0.65rem] opacity-70 line-clamp-2" title="{{ book.pipeline_message }}">{{ book.pipeline_message }}</span>
+                      {% endif %}
+                    </div>
                   {% endif %}
-                  <div class="flex flex-col gap-1">
-                    <span class="badge {{ badge }} gap-1 capitalize">{{ st }}</span>
-                    {% if book.pipeline_message %}
-                      <span class="text-[0.65rem] opacity-70 line-clamp-2" title="{{ book.pipeline_message }}">{{ book.pipeline_message }}</span>
-                    {% endif %}
-                    {% if book.mam_unavailable %}
-                      <span class="badge badge-warning w-fit">Waiting on MAM</span>
-                    {% endif %}
-                  </div>
                 </td>
                 <td class="text-xs">
                   {% set mt = (book.media_type or 'audiobook')|lower %}
