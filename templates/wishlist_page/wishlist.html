@@ -17,6 +17,7 @@
             <th>Length (hrs)</th>
             <th># Requested</th>
             <th>Status</th>
+            <th>Type</th>
             <th></th>
           </tr>
         </thead>
@@ -88,6 +89,14 @@
                       <span class="badge badge-warning w-fit">Waiting on MAM</span>
                     {% endif %}
                   </div>
+                </td>
+                <td class="text-xs">
+                  {% set mt = (book.media_type or 'audiobook')|lower %}
+                  {% if mt == 'ebook' %}
+                    <span class="flex items-center gap-1"><span class="inline-block w-4 h-4">{% include "icons/book.html" %}</span> Ebook</span>
+                  {% else %}
+                    <span class="flex items-center gap-1"><span class="inline-block w-4 h-4">{% include "icons/speaker.html" %}</span> Audio</span>
+                  {% endif %}
                 </td>
                 <td class="grid grid-cols-3 min-w-[12rem] gap-1">
                   <a preload

@@ -4,7 +4,7 @@
           hx-post="{{ base_url }}/search/request/{{ book.asin }}"
           hx-disabled-elt="button"
           hx-target="#toast-block"
-          hx-swap="outerHTML">
+          hx-swap="innerHTML">
         <div class="relative w-full h-[7rem] sm:h-[8rem] overflow-hidden rounded">
             {% if book.cover_image %}
                 <img class="object-cover w-full h-full hover:scale-110 transition-transform duration-500 ease-in-out"
