@@ -542,7 +542,11 @@ async def read_mam_search(
 
         client = MyAnonamouseClient(client_session, settings)
         try:
-            categories = [13] if media_type == MediaType.audiobook else [14]
+            if media_type == MediaType.ebook:
+                ebook_cats = [c.tracker_id for c in CATEGORY_MAPPINGS if c.name.startswith("Ebooks")]
+                categories = ebook_cats or [14]
+            else:
+                categories = [13]
             raw_results = await client.search(query, categories=categories)
             results = normalize_mam_results(raw_results)
         except Exception as e:

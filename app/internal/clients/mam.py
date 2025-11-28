@@ -30,11 +30,11 @@ class MamClientSettings(BaseModel):
 
     mam_session_id: str
     mam_base_url: str = "https://www.myanonamouse.net"
-    search_type: SearchType = SearchType.all
+    search_type: SearchType = SearchType.active
     search_in_description: bool = False
     search_in_series: bool = True
     search_in_filenames: bool = False
-    search_languages: list[int] = Field(default_factory=list)
+    search_languages: list[int] = Field(default_factory=lambda: [1])  # default to English
     search_category_id: int = 13
     torrent_download_endpoint: str = "/torrents.php?action=download&id={id}"
     use_mock_data: bool = False
