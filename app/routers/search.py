@@ -581,45 +581,39 @@ async def download_mam(
     request: Request,
     torrent_id: Annotated[str, Form()],
     title: Annotated[str, Form()],
-    media_type: Annotated[str | None, Form()] = None,
     session: Annotated[Session, Depends(get_session)],
     user: DetailedUser = Security(ABRAuth()),
     request_id: Annotated[str | None, Form()] = None,
+    media_type: Annotated[str | None, Form()] = None,
 ):
-    if not request_id:
-        return template_response(
-            "base.html",
-            request,
-            user,
-            {"toast_error": "Missing request id; open MAM search from a request page."},
-            block_name="toast_block",
-            headers={"HX-Retarget": "#toast-block"},
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+    job_media_raw = media_type or MediaType.audiobook.value
     try:
-        request_uuid = uuid.UUID(request_id)
-    except ValueError:
-        return template_response(
-            "base.html",
-            request,
-            user,
-            {"toast_error": "Invalid request id"},
-            block_name="toast_block",
-            headers={"HX-Retarget": "#toast-block"},
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
-    book_request = session.get(BookRequest, request_uuid)
+        job_media_type = MediaType(job_media_raw)
+    except Exception:
+        job_media_type = MediaType.audiobook
+    book_request = None
+    if request_id:
+        try:
+            request_uuid = uuid.UUID(request_id)
+            book_request = session.get(BookRequest, request_uuid)
+        except ValueError:
+            book_request = None
+    # If no request provided, create a lightweight request so the job can proceed
     if not book_request:
-        return template_response(
-            "base.html",
-            request,
-            user,
-            {"toast_error": "Request not found"},
-            block_name="toast_block",
-            headers={"HX-Retarget": "#toast-block"},
-            status_code=status.HTTP_404_NOT_FOUND,
+        book_request = BookRequest(
+            asin=f"mam-{torrent_id}",
+            title=title,
+            subtitle=None,
+            authors=[],
+            narrators=[],
+            cover_image=None,
+            release_date=datetime.utcnow(),
+            runtime_length_min=0,
+            user_username=user.username,
+            media_type=job_media_type,
         )
+        session.add(book_request)
+        session.commit()
 
     # Prevent duplicate jobs for the same request/torrent in active states
     existing_job = session.exec(
@@ -647,11 +641,6 @@ async def download_mam(
         )
 
     # Create DownloadJob
-    job_media_raw = media_type or getattr(book_request, "media_type", MediaType.audiobook.value)
-    try:
-        job_media_type = MediaType(job_media_raw)
-    except Exception:
-        job_media_type = MediaType.audiobook
     job = DownloadJob(
         request_id=book_request.id,
         title=title,
