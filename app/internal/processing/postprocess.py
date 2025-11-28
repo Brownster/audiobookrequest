@@ -320,9 +320,10 @@ class EbookPostProcessor:
             await self._apply_audio_metadata(destination, metadata)
 
     def _extract_metadata(self, request: BookRequest) -> dict:
-        title = request.title or "Untitled"
-        authors = request.authors or ["Unknown Author"]
+        title = request.title
+        authors = request.authors or []
         narrators = request.narrators or []
+        
         primary_author = authors[0] if authors else ""
         display_name = f"{primary_author} - {title}" if primary_author else title
 
@@ -332,13 +333,16 @@ class EbookPostProcessor:
             "artist": ", ".join(narrators or authors),
             "album_artist": primary_author or ", ".join(authors),
             "composer": ", ".join(narrators) if narrators else None,
+            # "comment": request.description, # BookRequest doesn't have description yet, maybe add it?
         }
-
+        
         return {
             "title": title,
             "authors": authors,
             "narrators": narrators,
+            # "series": request.series, # Not in BookRequest
             "asin": request.asin,
+            # "description": request.description,
             "cover_url": request.cover_image,
             "publish_date": request.release_date.isoformat() if request.release_date else None,
             "ffmpeg_tags": ffmpeg_tags,
@@ -426,120 +430,11 @@ class EbookPostProcessor:
         cover_path.write_bytes(data)
         return cover_path
 
-async def _cleanup_tmp(self) -> None:
-    try:
-        for p in self.tmp_dir.glob("ffmpeg_concat_*"):
-            p.unlink(missing_ok=True)
-        for p in self.tmp_dir.glob("cover_*"):
-            p.unlink(missing_ok=True)
-    except Exception as exc:
-        logger.debug("PostProcessor: tmp cleanup skipped", error=str(exc))
-        
-
-# Fallback: bind _extract_metadata to the class if missing (defensive against reload issues)
-def _pp_extract_metadata(self, request: BookRequest) -> dict:
-    title = request.title or "Untitled"
-    authors = request.authors or ["Unknown Author"]
-    narrators = request.narrators or []
-    primary_author = authors[0] if authors else ""
-    display_name = f"{primary_author} - {title}" if primary_author else title
-    ffmpeg_tags = {
-        "title": title,
-        "album": title,
-        "artist": ", ".join(narrators or authors),
-        "album_artist": primary_author or ", ".join(authors),
-        "composer": ", ".join(narrators) if narrators else None,
-    }
-    return {
-        "title": title,
-        "authors": authors,
-        "narrators": narrators,
-        "asin": request.asin,
-        "cover_url": request.cover_image,
-        "publish_date": request.release_date.isoformat() if request.release_date else None,
-        "ffmpeg_tags": ffmpeg_tags,
-        "display_name": display_name,
-    }
-
-# Attach if missing
-try:
-    if not hasattr(PostProcessor, "_extract_metadata"):
-        PostProcessor._extract_metadata = _pp_extract_metadata  # type: ignore[attr-defined]
-except NameError:
-    pass
-
-# Fallback: bind other helper methods if missing (defensive against reload issues)
-def _pp_find_source_fallback(self, download_dir: Path, name: str, files: list[dict]) -> Optional[Path]:
-    for f in files or []:
-        rel = f.get("name")
-        if not isinstance(rel, str):
-            continue
-        parts = Path(rel).parts
-        if parts:
-            candidate = download_dir / parts[0]
-            if candidate.exists():
-                return candidate
-    target = self._normalize(name)
-    try:
-        for entry in download_dir.iterdir():
-            if self._normalize(entry.name) == target:
-                return entry
-    except FileNotFoundError:
-        return None
-    return None
-
-def _pp_gather_audio_files(self, base_dir: Path, files: Iterable[dict]) -> List[Path]:
-    audio_paths: List[Path] = []
-    for f in files:
-        name = f.get("name")
-        if not isinstance(name, str):
-            continue
-        path = base_dir / name
-        if path.suffix.lower() in AUDIO_EXTENSIONS and path.exists():
-            audio_paths.append(path)
-    audio_paths.sort()
-    return audio_paths
-
-def _pp_find_audio_files_recursive(self, base_dir: Path) -> List[Path]:
-    found: List[Path] = []
-    for ext in AUDIO_EXTENSIONS:
-        found.extend(base_dir.rglob(f"*{ext}"))
-    found = [p for p in found if p.is_file()]
-    found.sort()
-    return found
-
-try:
-    if not hasattr(PostProcessor, "_find_source_fallback"):
-        PostProcessor._find_source_fallback = _pp_find_source_fallback  # type: ignore[attr-defined]
-    if not hasattr(PostProcessor, "_gather_audio_files"):
-        PostProcessor._gather_audio_files = _pp_gather_audio_files  # type: ignore[attr-defined]
-    if not hasattr(PostProcessor, "_find_audio_files_recursive"):
-        PostProcessor._find_audio_files_recursive = _pp_find_audio_files_recursive  # type: ignore[attr-defined]
-except NameError:
-    pass
-
-    def _extract_metadata(self, request: BookRequest) -> dict:
-        title = request.title or "Untitled"
-        authors = request.authors or ["Unknown Author"]
-        narrators = request.narrators or []
-        primary_author = authors[0] if authors else ""
-        display_name = f"{primary_author} - {title}" if primary_author else title
-
-        ffmpeg_tags = {
-            "title": title,
-            "album": title,
-            "artist": ", ".join(narrators or authors),
-            "album_artist": primary_author or ", ".join(authors),
-            "composer": ", ".join(narrators) if narrators else None,
-        }
-
-        return {
-            "title": title,
-            "authors": authors,
-            "narrators": narrators,
-            "asin": request.asin,
-            "cover_url": request.cover_image,
-            "publish_date": request.release_date.isoformat() if request.release_date else None,
-            "ffmpeg_tags": ffmpeg_tags,
-            "display_name": display_name,
-        }
+    async def _cleanup_tmp(self) -> None:
+        try:
+            for p in self.tmp_dir.glob("ffmpeg_concat_*"):
+                p.unlink(missing_ok=True)
+            for p in self.tmp_dir.glob("cover_*"):
+                p.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.debug("PostProcessor: tmp cleanup skipped", error=str(exc))
