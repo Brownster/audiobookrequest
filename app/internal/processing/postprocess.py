@@ -320,6 +320,32 @@ class EbookPostProcessor:
             await self._apply_audio_metadata(destination, metadata)
 
     def _extract_metadata(self, request: BookRequest) -> dict:
+        title = request.title or "Untitled"
+        authors = request.authors or ["Unknown Author"]
+        narrators = request.narrators or []
+        primary_author = authors[0] if authors else ""
+        display_name = f"{primary_author} - {title}" if primary_author else title
+
+        ffmpeg_tags = {
+            "title": title,
+            "album": title,
+            "artist": ", ".join(narrators or authors),
+            "album_artist": primary_author or ", ".join(authors),
+            "composer": ", ".join(narrators) if narrators else None,
+        }
+
+        return {
+            "title": title,
+            "authors": authors,
+            "narrators": narrators,
+            "asin": request.asin,
+            "cover_url": request.cover_image,
+            "publish_date": request.release_date.isoformat() if request.release_date else None,
+            "ffmpeg_tags": ffmpeg_tags,
+            "display_name": display_name,
+        }
+
+    def _extract_metadata(self, request: BookRequest) -> dict:
         title = request.title
         authors = request.authors or []
         narrators = request.narrators or []
