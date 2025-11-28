@@ -25,6 +25,7 @@ def _serialize_job(job: DownloadJob) -> dict:
         "created_at": job.created_at,
         "completed_at": job.completed_at,
         "destination_path": job.destination_path,
+        "media_type": getattr(job, "media_type", None),
     }
 
 

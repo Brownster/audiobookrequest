@@ -11,6 +11,7 @@
             <th>Message</th>
             <th>Added</th>
             <th>Finished</th>
+            <th>Type</th>
             <th>Client</th>
             <th>Actions</th>
           </tr>
@@ -43,6 +44,14 @@
               </td>
               <td class="text-sm opacity-80">
                 {% if job.completed_at %}{{ job.completed_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}
+              </td>
+              <td class="text-sm">
+                {% set mt = (job.media_type or 'audiobook')|lower %}
+                {% if mt == 'ebook' %}
+                  <span class="flex items-center gap-1"><span class="inline-block w-4 h-4">{% include "icons/book.html" %}</span> Ebook</span>
+                {% else %}
+                  <span class="flex items-center gap-1"><span class="inline-block w-4 h-4">{% include "icons/speaker.html" %}</span> Audio</span>
+                {% endif %}
               </td>
               <td class="text-sm">
                 {{ job.provider or "qBittorrent" }}
