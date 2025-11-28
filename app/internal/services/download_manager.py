@@ -602,6 +602,13 @@ class DownloadManager:
                 state = t_info.get("state") or t_info.get("status") or ""
                 state_lower = str(state).lower()
                 if state:
+                    logger.debug(
+                        "DownloadManager: monitor torrent state",
+                        hash=job.transmission_hash,
+                        state=state,
+                        status=job.status.value if hasattr(job.status, "value") else str(job.status),
+                    )
+                if state:
                     # Set a more accurate message/status based on qBittorrent state
                     inactive_states = {"pausedup", "pauseup", "pauseddl", "queuedup", "queueddl", "stalledup", "checkingup", "stalledup"}
                     downloading_states = {"downloading", "stalleddl", "forceddl"}

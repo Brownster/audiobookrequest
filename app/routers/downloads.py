@@ -26,6 +26,7 @@ def _serialize_job(job: DownloadJob) -> dict:
         "completed_at": job.completed_at,
         "destination_path": job.destination_path,
         "media_type": getattr(job, "media_type", None),
+        "client_state": job.message if (job.message or "").lower().startswith("qb state:") else None,
     }
 
 

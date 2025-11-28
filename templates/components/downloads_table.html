@@ -31,7 +31,12 @@
                 {% elif status == "processing" %}{% set badge = "badge-warning" %}
                 {% elif status in ["downloading","seeding","pending"] %}{% set badge = "badge-info" %}
                 {% endif %}
-                <span class="badge {{ badge }} gap-2 capitalize">{{ status }}</span>
+                <div class="flex flex-col gap-1">
+                  <span class="badge {{ badge }} gap-2 capitalize">{{ status }}</span>
+                  {% if job.client_state %}
+                    <span class="badge badge-outline badge-xs">{{ job.client_state }}</span>
+                  {% endif %}
+                </div>
               </td>
               <td class="max-w-sm">
                 <div class="text-sm truncate" title="{{ job.message or '' }}">{{ job.message or "—" }}</div>
