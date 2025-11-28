@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import datetime
 from typing import Annotated, Optional
 from urllib.parse import quote_plus
@@ -585,12 +586,23 @@ async def download_mam(
     user: DetailedUser = Security(ABRAuth()),
     request_id: Annotated[str | None, Form()] = None,
     media_type: Annotated[str | None, Form()] = None,
+    authors: Annotated[str | None, Form()] = None,
+    cover_image: Annotated[str | None, Form()] = None,
 ):
     job_media_raw = media_type or MediaType.audiobook.value
     try:
         job_media_type = MediaType(job_media_raw)
     except Exception:
         job_media_type = MediaType.audiobook
+
+    parsed_authors: list[str] = []
+    if authors:
+        try:
+            parsed = json.loads(authors)
+            if isinstance(parsed, list):
+                parsed_authors = [str(a) for a in parsed if isinstance(a, str)]
+        except Exception:
+            parsed_authors = []
     book_request = None
     if request_id:
         try:
@@ -604,9 +616,9 @@ async def download_mam(
             asin=f"mam-{torrent_id}",
             title=title,
             subtitle=None,
-            authors=[],
+            authors=parsed_authors or ["Unknown Author"],
             narrators=[],
-            cover_image=None,
+            cover_image=cover_image,
             release_date=datetime.utcnow(),
             runtime_length_min=0,
             user_username=user.username,

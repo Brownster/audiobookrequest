@@ -83,7 +83,7 @@
                   <span class="absolute left-1 top-1 badge badge-sm">MAM</span>
                   <button class="absolute top-0 right-0 rounded-none rounded-bl-md btn-sm btn btn-square items-center justify-center flex btn-info"
                           hx-post="{{ base_url }}/search/mam/download"
-                          hx-vals='{"torrent_id": "{{ result.source.raw.id }}", "title": {{ result.title | tojson }}, "media_type": "{{ media_type | default("audiobook") }}"{% if request_id %}, "request_id": "{{ request_id }}"{% endif %}}'
+                          hx-vals='{"torrent_id": "{{ result.source.raw.id }}", "title": {{ result.title | tojson }}, "authors": {{ result.authors | tojson }}, "cover_image": {{ result.cover_image | tojson }}, "media_type": "{{ media_type | default("audiobook") }}"{% if request_id %}, "request_id": "{{ request_id }}"{% endif %}}'
                           hx-swap="outerHTML">
                     {% include "icons/download.html" %}
                   </button>
