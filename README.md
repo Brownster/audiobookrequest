@@ -11,6 +11,7 @@ This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is
 - Downloads page: live status, Retry, and Remove actions for failed/stuck jobs.
 - Audiobookshelf integration: marks existing items as downloaded and triggers scans after successful jobs.
 - AI recommendations: pick OpenAI (`gpt-4o-mini` etc.) or Ollama for homepage/AI recs.
+- Ebook support: toggle MAM search to Ebooks; processed files land in `author/title/book.<ext>` under `ABR_APP__BOOK_DIR`.
 
 ## Quick start (Docker)
 1. Build or pull an image (example uses GHCR):
@@ -42,12 +43,21 @@ This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is
 3. Open http://localhost:9001 and create the first admin user.
 
 ## Configure MAM + qBittorrent
-1. Settings ▸ MAM: paste your `mam_id` cookie.
+1. Settings ▸ MAM: paste your cookies in the format `mam_id=<value>; uid=<value>` (both come from your myanonamouse.net cookies).
 2. Settings ▸ qBittorrent: set WebUI URL/user/pass, seed target, and path mappings:
    - `qB Remote Download Path`: what qB reports (e.g., `/` or `/mnt/seedbox/Downloads`).
    - `qB Local Path Prefix`: where that path is mounted on the host (e.g., `/downloads`).
-3. Set `ABR_APP__DOWNLOAD_DIR` to your ABS library/watch path (e.g., `/audiobooks`) and restart.
+3. Set `ABR_APP__DOWNLOAD_DIR` (audiobooks) and `ABR_APP__BOOK_DIR` (ebooks) to your library paths and restart.
 4. Use “Check on MAM” or “Auto download via MAM” from search/wishlist; monitor `/downloads`.
+
+### Mounting a seedbox (sshfs example)
+If qB is remote and you post-process locally, mount the seedbox download root:
+```bash
+sudo apt install sshfs  # or dnf/yum equivalent
+mkdir -p /mnt/seedbox
+sshfs user@seedbox:/path/to/Downloads /mnt/seedbox -o reconnect,ServerAliveInterval=15,ServerAliveCountMax=3
+```
+Then set qB Remote Path to `/path/to/Downloads` and Local Prefix to `/mnt/seedbox`.
 
 ## Audiobookshelf
 Settings ▸ Audiobookshelf: enter base URL + API token and choose the library. ABR will mark existing items as downloaded and trigger scans after successful jobs.
@@ -61,6 +71,7 @@ Settings ▸ AI:
 - `ABR_APP__PORT` (default 8000)
 - `ABR_APP__BASE_URL` (set if serving under a subpath, else leave empty)
 - `ABR_APP__DOWNLOAD_DIR` (final audiobook output; bind-mount it)
+- `ABR_APP__BOOK_DIR` (final ebook output; bind-mount it)
 - `ABR_APP__DEFAULT_REGION` (audible region, e.g., `uk`)
 - `ABR_DB__USE_POSTGRES=true` plus `ABR_DB__POSTGRES_*` if using Postgres; otherwise SQLite in `/config`.
 - `ABR_APP__INIT_ROOT_USERNAME` / `ABR_APP__INIT_ROOT_PASSWORD` to seed the first admin on fresh installs.
