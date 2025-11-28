@@ -3,12 +3,13 @@
   <title>MAM Search</title>
   <script>
   const onSearch = () => {
-    const search_term = document.querySelector("input").value;
+    const search_term = document.querySelector('input[name="q"]').value;
+    const media = document.querySelector('input[name="media"]:checked')?.value || "audiobook";
     const requestIdEl = document.querySelector('input[name="request_id"]');
     document.getElementById("search").disabled = true;
     document.getElementById("search-text").style.display = "none";
     document.getElementById("search-spinner").style.display = "inline-block";
-    let url = `/search/mam?q=${encodeURIComponent(search_term)}`;
+    let url = `/search/mam?q=${encodeURIComponent(search_term)}&media=${encodeURIComponent(media)}`;
     if (requestIdEl && requestIdEl.value) {
       url += `&request_id=${encodeURIComponent(requestIdEl.value)}`;
     }
