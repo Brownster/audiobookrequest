@@ -18,7 +18,7 @@
             <th># Requested</th>
             <th>Status</th>
             <th>Type</th>
-            <th></th>
+            <th>Actions</th>
           </tr>
         </thead>
         {% if not books %}
@@ -98,54 +98,61 @@
                     <span class="flex items-center gap-1"><span class="inline-block w-4 h-4">{% include "icons/speaker.html" %}</span> Audio</span>
                   {% endif %}
                 </td>
-                <td class="grid grid-cols-3 min-w-[12rem] gap-1">
-                  <a preload
-                     title="Torrent Sources"
-                     href="{{ base_url }}/wishlist/sources/{{ book.asin }}"
-                     {% if not user.is_admin() %}disabled{% endif %}
-                     class="btn btn-square">{% include "icons/list.html" %}</a>
-                  {% if book.download_error %}
-                    <button title="Automatic Download"
-                            class="btn btn-square btn-ghost bg-error/70 text-base-100"
-                            disabled>{% include "icons/xmark.html" %}</button>
-                  {% else %}
-                    <button {% if book.downloaded %}title="Downloaded"class="btn btn-square btn-ghost bg-success text-neutral/20" {% else %} title="Automatic Download" class="btn btn-square" {% endif %}
-                            {% if not user.can_download() or book.downloaded %}disabled{% endif %}
-                            hx-post="{{ base_url }}/wishlist/auto-download/{{ book.asin }}"
-                            hx-swap="outerHTML"
-                            hx-target="#book-table-body"
-                            hx-disabled-elt="this">{% include "icons/download.html" %}</button>
-                  {% endif %}
-                  <button title="Remove"
-                          class="btn btn-square"
-                          {% if not user.is_admin() %}disabled{% endif %}
-                          hx-delete="{{ base_url }}/search/request/{{ book.asin }}{%- if page.__eq__('downloaded') -%}?downloaded=true{%- endif -%}"
-                          hx-swap="outerHTML"
-                          hx-target="#book-table-body"
-                          hx-disabled-elt="this">{% include "icons/ban.html" %}</button>
+                <td>
                   {% if book.downloaded %}
-                    <button class="btn btn-square btn-ghost bg-success text-neutral/20"
-                            disabled
-                            title="Set as downloaded">{% include "icons/checkmark.html" %}</button>
+                    {# Already downloaded - show minimal actions #}
+                    <div class="flex gap-1">
+                      <button title="Remove from wishlist"
+                              class="btn btn-square btn-sm btn-ghost"
+                              {% if not user.is_admin() %}disabled{% endif %}
+                              hx-delete="{{ base_url }}/search/request/{{ book.asin }}?downloaded=true"
+                              hx-swap="outerHTML"
+                              hx-target="#book-table-body"
+                              hx-disabled-elt="this">
+                        {% include "icons/ban.html" %}
+                      </button>
+                      <span class="badge badge-success badge-sm gap-1">
+                        {% include "icons/checkmark.html" %}
+                      </span>
+                    </div>
                   {% else %}
-                    <a class="btn btn-square"
-                       title="Browse on MAM"
-                       href="{{ base_url }}/search/mam?{% if book.id %}request_id={{ book.id }}&{% endif %}q={{ book.title | urlencode }}">
-                      {% include "icons/search.html" %}
-                    </a>
-                    <button class="btn btn-square"
-                            title="Set as downloaded"
-                            hx-patch="{{ base_url }}/wishlist/downloaded/{{ book.asin }}"
-                            hx-swap="outerHTML"
-                            hx-target="#book-table-body"
-                            hx-disabled-elt="this">{% include "icons/checkmark.html" %}</button>
-                    <button class="btn btn-square btn-secondary"
-                            title="Auto download via MAM"
-                            hx-post="{{ base_url }}/wishlist/mam-auto/{{ book.id }}"
-                            hx-swap="outerHTML"
-                            hx-target="#book-table-body"
-                            hx-disabled-elt="this"
-                            {% if not user.can_download() or book.downloaded %}disabled{% endif %}>{% include "icons/download.html" %}</button>
+                    {# Not downloaded yet - show all actions #}
+                    <div class="flex gap-1">
+                      <button title="Remove from wishlist"
+                              class="btn btn-square btn-sm btn-error btn-outline"
+                              {% if not user.is_admin() %}disabled{% endif %}
+                              hx-delete="{{ base_url }}/search/request/{{ book.asin }}"
+                              hx-swap="outerHTML"
+                              hx-target="#book-table-body"
+                              hx-disabled-elt="this"
+                              hx-confirm="Remove {{ book.title }} from wishlist?">
+                        {% include "icons/ban.html" %}
+                      </button>
+                      <a preload
+                         title="Manual Search: Open MAM search with this book pre-filled"
+                         class="btn btn-square btn-sm btn-primary btn-outline"
+                         href="{{ base_url }}/search/mam?{% if book.id %}request_id={{ book.id }}&{% endif %}q={{ book.title | urlencode }}">
+                        {% include "icons/search.html" %}
+                      </a>
+                      <button title="Mark as Downloaded: For when things go wrong"
+                              class="btn btn-square btn-sm btn-success btn-outline"
+                              {% if not user.is_admin() %}disabled{% endif %}
+                              hx-patch="{{ base_url }}/wishlist/downloaded/{{ book.asin }}"
+                              hx-swap="outerHTML"
+                              hx-target="#book-table-body"
+                              hx-disabled-elt="this">
+                        {% include "icons/checkmark.html" %}
+                      </button>
+                      <button title="Auto Download: Automatically search MAM and download best match"
+                              class="btn btn-square btn-sm btn-secondary"
+                              hx-post="{{ base_url }}/wishlist/mam-auto/{{ book.id }}"
+                              hx-swap="outerHTML"
+                              hx-target="#book-table-body"
+                              hx-disabled-elt="this"
+                              {% if not user.can_download() %}disabled{% endif %}>
+                        {% include "icons/download.html" %}
+                      </button>
+                    </div>
                   {% endif %}
                 </td>
               </tr>

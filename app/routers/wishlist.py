@@ -113,6 +113,7 @@ def get_wishlist_books(
 
     request_ids = [b.id for b in book_requests if b.id]
     jobs: dict[uuid.UUID, DownloadJob] = {}
+    active_job_request_ids: set[uuid.UUID] = set()
     if request_ids:
         all_jobs = session.exec(
             select(DownloadJob)
@@ -125,6 +126,14 @@ def get_wishlist_books(
                 continue
             jobs[j.request_id] = j
             seen.add(j.request_id)
+            # Track requests with active downloads (seeding, processing, completed)
+            # These should be hidden from wishlist and tracked on downloads page instead
+            if j.status in [
+                DownloadJobStatus.seeding,
+                DownloadJobStatus.processing,
+                DownloadJobStatus.completed,
+            ]:
+                active_job_request_ids.add(j.request_id)
 
     # group by asin and aggregate all usernames
     usernames: dict[str, list[str]] = defaultdict(list)
@@ -139,6 +148,10 @@ def get_wishlist_books(
     books: list[BookWishlistResult] = []
     downloaded: list[BookWishlistResult] = []
     for asin, book in distinct_books.items():
+        # Skip books with active download jobs (they're being handled)
+        if book.id in active_job_request_ids and not book.downloaded:
+            continue
+
         b = BookWishlistResult.model_validate(book)
         b.requested_by = usernames[asin]
         b.mam_unavailable = getattr(book, "mam_unavailable", False)

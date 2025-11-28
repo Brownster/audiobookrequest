@@ -567,11 +567,17 @@ class DownloadManager:
                 except Exception:
                     pass
 
-            jobs = session.exec(select(DownloadJob).where(DownloadJob.status.in_([DownloadJobStatus.downloading, DownloadJobStatus.seeding]))).all()
-            
+            # Include "failed" jobs so we can auto-correct jobs that failed post-processing but are still seeding
+            jobs = session.exec(
+                select(DownloadJob).where(
+                    DownloadJob.status.in_([DownloadJobStatus.downloading, DownloadJobStatus.seeding, DownloadJobStatus.failed]),
+                    DownloadJob.transmission_hash.is_not(None)
+                )
+            ).all()
+
             if not jobs:
                 return
-            
+
             hashes = [j.transmission_hash for j in jobs if j.transmission_hash]
             if not hashes:
                 return
@@ -590,7 +596,17 @@ class DownloadManager:
                 if not t_info:
                     # Torrent missing?
                     continue
-                
+
+                # Auto-correct failed jobs that are still active in qBittorrent
+                # (e.g., post-processing failed but torrent is still seeding)
+                if job.status == DownloadJobStatus.failed:
+                    job.status = DownloadJobStatus.seeding
+                    logger.info(
+                        "DownloadManager: auto-corrected failed job to seeding",
+                        job_id=str(job.id),
+                        hash=job.transmission_hash,
+                    )
+
                 # Update seed stats
                 job.seed_seconds = job.seed_seconds or 0
                 # Transmission reports secondsSeeding; qB uses seeding_time
@@ -610,27 +626,48 @@ class DownloadManager:
                     )
                 if state:
                     # Set a more accurate message/status based on qBittorrent state
-                    inactive_states = {"pausedup", "pauseup", "pauseddl", "queuedup", "queueddl", "stalledup", "checkingup", "stalledup"}
-                    downloading_states = {"downloading", "stalleddl", "forceddl"}
+                    # Separate inactive states by download/upload phase
+                    inactive_downloading_states = {"pauseddl", "queueddl", "stalleddl", "checkingdl"}
+                    inactive_seeding_states = {"pausedup", "queuedup", "stalledup", "checkingup"}
+                    downloading_states = {"downloading", "forceddl", "metadl", "allocating"}
                     uploading_states = {"uploading", "forcedup"}
+
                     if state_lower in downloading_states:
                         job.status = DownloadJobStatus.downloading
                         job.message = f"qB state: {state}"
-                    elif state_lower in inactive_states:
-                        job.status = DownloadJobStatus.seeding
-                        job.message = f"qB state: {state} (inactive) -> force-start"
-                        try:
-                            # Force resume if paused/stalled
-                            await self.torrent_client.resume(job.transmission_hash)
-                            # For qB, also try to force-start to avoid inactive seeding
-                            if isinstance(self.torrent_client, QbitClient):
-                                await self.torrent_client.force_start(job.transmission_hash)
-                            logger.info("DownloadManager: forced resume on inactive torrent", hash=job.transmission_hash, state=state)
-                        except Exception as exc:
-                            logger.warning("DownloadManager: failed to resume inactive torrent", error=str(exc))
                     elif state_lower in uploading_states:
                         job.status = DownloadJobStatus.seeding
                         job.message = f"qB state: {state}"
+                    elif state_lower in inactive_downloading_states:
+                        # Inactive while downloading - resume but don't force-start yet
+                        job.status = DownloadJobStatus.downloading
+                        job.message = f"qB state: {state} (inactive) → resuming"
+                        try:
+                            await self.torrent_client.resume(job.transmission_hash)
+                            logger.info("DownloadManager: resumed inactive downloading torrent", hash=job.transmission_hash, state=state)
+                        except Exception as exc:
+                            logger.warning("DownloadManager: failed to resume inactive downloading torrent", error=str(exc))
+                            job.message = f"qB state: {state} (resume failed)"
+                    elif state_lower in inactive_seeding_states:
+                        # Inactive while seeding - force-start to ensure active seeding
+                        job.status = DownloadJobStatus.seeding
+                        job.message = f"qB state: {state} (inactive) → force-starting"
+                        try:
+                            if isinstance(self.torrent_client, QbitClient):
+                                # Force-start is the most aggressive way to ensure seeding
+                                await self.torrent_client.force_start(job.transmission_hash)
+                                logger.info("DownloadManager: force-started inactive seeding torrent", hash=job.transmission_hash, state=state)
+                                job.message = f"qB state: force-started (was {state})"
+                            else:
+                                # Fallback to resume for non-qB clients
+                                await self.torrent_client.resume(job.transmission_hash)
+                                logger.info("DownloadManager: resumed inactive seeding torrent", hash=job.transmission_hash, state=state)
+                        except Exception as exc:
+                            logger.warning("DownloadManager: failed to force-start inactive seeding torrent", error=str(exc), hash=job.transmission_hash)
+                            job.message = f"qB state: {state} (force-start failed)"
+
+                    # Persist state and message updates
+                    session.add(job)
 
                 left_until_done = t_info.get("leftUntilDone")
                 progress = t_info.get("progress")
@@ -664,14 +701,47 @@ class DownloadManager:
                 meets_seed_time = required_seed == 0 or job.seed_seconds >= required_seed
                 meets_ratio = ratio_limit is None or (current_ratio >= ratio_limit)
 
-                if is_downloaded and meets_seed_time and meets_ratio and job.status != DownloadJobStatus.processing:
+                # Check if we should move to completed (post-processing done AND seed time met)
+                if (
+                    job.status == DownloadJobStatus.seeding
+                    and job.destination_path  # Post-processing completed
+                    and meets_seed_time
+                    and meets_ratio
+                ):
+                    # Seed time requirement met - remove torrent and mark as completed
+                    try:
+                        await self.torrent_client.remove_torrent(job.transmission_hash)
+                        logger.info(
+                            "DownloadManager: removed torrent after seed time met",
+                            job_id=str(job.id),
+                            hash=job.transmission_hash,
+                            seed_seconds=job.seed_seconds,
+                            required_seed=required_seed,
+                        )
+                        job.status = DownloadJobStatus.completed
+                        job.message = f"Seeded for {job.seed_seconds // 3600}h - completed"
+                        if not job.completed_at:
+                            job.completed_at = datetime.utcnow()
+                        session.add(job)
+                    except Exception as exc:
+                        logger.warning(
+                            "DownloadManager: failed to remove torrent after seed completion",
+                            error=str(exc),
+                            hash=job.transmission_hash,
+                        )
+                        # Don't update status if removal failed - will retry next cycle
+                elif is_downloaded and meets_seed_time and meets_ratio and job.status != DownloadJobStatus.processing:
+                    # Start post-processing (but keep seeding)
                     job.status = DownloadJobStatus.processing
                     job.message = "Download complete, starting processing"
                     session.add(job)
                     session.commit()
-                    
+
                     # Trigger finalization in background
                     asyncio.create_task(self._finalize_job(str(job.id), t_info))
+
+            # Commit all state/message updates for monitored jobs
+            session.commit()
 
     async def _finalize_job(self, job_id: str, torrent_snapshot: dict):
         async with self._postprocess_lock:
@@ -782,12 +852,14 @@ class DownloadManager:
                     # await self.torrent_client.remove_torrent(job.transmission_hash)
                     
                 except asyncio.TimeoutError:
-                    job.status = DownloadJobStatus.failed
-                    job.message = "Post-processing timed out"
+                    # Keep status as seeding since torrent is still active
+                    job.status = DownloadJobStatus.seeding
+                    job.message = "Post-processing failed: Timed out after 30 minutes"
                     session.add(job)
                     session.commit()
                 except Exception as exc:
-                    job.status = DownloadJobStatus.failed
+                    # Keep status as seeding since torrent is still active
+                    job.status = DownloadJobStatus.seeding
                     job.message = f"Post-processing failed: {exc}"
                     session.add(job)
                     session.commit()

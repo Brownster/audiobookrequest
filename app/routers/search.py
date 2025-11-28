@@ -584,6 +584,8 @@ async def read_mam_search(
                 categories = [13]
             raw_results = await client.search(query, categories=categories)
             results = normalize_mam_results(raw_results)
+            # Sort by seeders descending (most popular first)
+            results.sort(key=lambda r: r.seeders, reverse=True)
         except Exception as e:
             logger.error("MAM search failed", error=str(e))
             return template_response(

@@ -1,0 +1,74 @@
+<div class="w-full max-w-6xl space-y-3" id="downloads-history-table">
+  {% if not jobs or not jobs|length %}
+    <div class="p-6 border rounded-box text-sm opacity-70">No completed downloads in history yet.</div>
+  {% else %}
+    <div class="overflow-x-auto">
+      <table class="table w-full">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Completed</th>
+            <th>Seed Time</th>
+            <th>Destination</th>
+            <th>Type</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+            <tr class="hover">
+              <td class="max-w-xs">
+                <div class="font-semibold truncate" title="{{ job.title }}">{{ job.title }}</div>
+                <div class="text-xs opacity-70">mamid {{ job.torrent_id or "-" }}</div>
+              </td>
+              <td class="text-sm opacity-80">
+                {% if job.completed_at %}{{ job.completed_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}
+              </td>
+              <td class="text-sm">
+                {% if job.seed_time_elapsed %}
+                  {% set elapsed_hrs = (job.seed_time_elapsed / 3600)|round(1) %}
+                  <span class="badge badge-success badge-sm gap-1">
+                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                    </svg>
+                    {{ elapsed_hrs }}h
+                  </span>
+                  {% if job.seed_time_required %}
+                    {% set required_hrs = (job.seed_time_required / 3600)|round(0)|int %}
+                    <span class="text-xs opacity-70">/ {{ required_hrs }}h</span>
+                  {% endif %}
+                {% else %}
+                  <span class="opacity-50">—</span>
+                {% endif %}
+              </td>
+              <td class="max-w-sm">
+                {% if job.destination_path %}
+                  <div class="text-sm truncate" title="{{ job.destination_path }}">{{ job.destination_path }}</div>
+                {% else %}
+                  <span class="opacity-50 text-sm">—</span>
+                {% endif %}
+              </td>
+              <td class="text-sm">
+                {% set mt = (job.media_type or 'audiobook')|lower %}
+                {% if mt == 'ebook' %}
+                  <span class="flex items-center gap-1"><span class="inline-block w-4 h-4">{% include "icons/book.html" %}</span> Ebook</span>
+                {% else %}
+                  <span class="flex items-center gap-1"><span class="inline-block w-4 h-4">{% include "icons/speaker.html" %}</span> Audio</span>
+                {% endif %}
+              </td>
+              <td class="text-sm">
+                <button class="btn btn-xs btn-ghost"
+                        hx-post="{{ base_url }}/downloads/{{ job.id }}/delete?from_history=true"
+                        hx-target="#downloads-history-table"
+                        hx-swap="outerHTML"
+                        hx-confirm="Remove this history entry?">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block head %}
+  <title>Download History</title>
+{% endblock head %}
+{% block body %}
+  <div class="w-screen flex flex-col items-center justify-center p-6 sm:p-8 overflow-x-hidden gap-4">
+    <div class="w-full max-w-6xl flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold">Download History</h1>
+        <p class="text-sm opacity-70">Completed downloads that have finished seeding.</p>
+      </div>
+      <a href="{{ base_url }}/downloads" class="btn btn-ghost btn-sm">Back to Active Downloads</a>
+    </div>
+    <div class="w-full max-w-6xl"
+         id="downloads-history-table"
+         hx-get="{{ base_url }}/downloads/history/fragment"
+         hx-trigger="load, every 15s"
+         hx-target="#downloads-history-table"
+         hx-swap="outerHTML">
+      <div class="p-6 border rounded-box">Loading…</div>
+    </div>
+  </div>
+{% endblock body %}

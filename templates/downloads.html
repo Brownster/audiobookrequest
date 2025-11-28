@@ -9,7 +9,10 @@
         <h1 class="text-3xl font-bold">Downloads</h1>
         <p class="text-sm opacity-70">Track each step: MAM → qBittorrent → Post-processing → Audiobookshelf.</p>
       </div>
-      <div class="text-sm opacity-70">Auto-refreshing</div>
+      <div class="flex items-center gap-4">
+        <a href="{{ base_url }}/downloads/history" class="btn btn-ghost btn-sm">View History</a>
+        <div class="text-sm opacity-70">Auto-refreshing</div>
+      </div>
     </div>
     <div class="w-full max-w-6xl"
          id="downloads-table"

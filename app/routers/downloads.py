@@ -1,19 +1,37 @@
-from fastapi import APIRouter, Depends, Request, Security
+import uuid
+from fastapi import APIRouter, Depends, Request, Security, HTTPException
 from sqlalchemy import desc
 from sqlmodel import Session, select
 
 from app.internal.auth.authentication import ABRAuth, DetailedUser
 from app.internal.models import DownloadJob
 from app.internal.services.download_manager import DownloadManager
+from app.internal.services.seeding import TorrentSeedConfiguration
 from app.util.db import get_session
 from app.util.templates import template_response
-from fastapi import HTTPException
 
 
 router = APIRouter()
 
 
 def _serialize_job(job: DownloadJob) -> dict:
+    # Extract client state from message if it contains state information
+    client_state = None
+    if job.message:
+        msg_lower = job.message.lower()
+        if any(keyword in msg_lower for keyword in ["qb state:", "force-start", "resuming", "inactive"]):
+            client_state = job.message
+
+    # Calculate seed time remaining
+    seed_time_remaining_seconds = None
+    seed_time_elapsed_seconds = job.seed_seconds or 0
+    seed_time_required_seconds = None
+    if job.seed_configuration:
+        config = TorrentSeedConfiguration.from_record(job.seed_configuration)
+        if config and config.required_seed_seconds:
+            seed_time_required_seconds = config.required_seed_seconds
+            seed_time_remaining_seconds = max(0, config.required_seed_seconds - seed_time_elapsed_seconds)
+
     return {
         "id": str(job.id),
         "title": job.title,
@@ -26,7 +44,10 @@ def _serialize_job(job: DownloadJob) -> dict:
         "completed_at": job.completed_at,
         "destination_path": job.destination_path,
         "media_type": getattr(job, "media_type", None),
-        "client_state": job.message if (job.message or "").lower().startswith("qb state:") else None,
+        "client_state": client_state,
+        "seed_time_elapsed": seed_time_elapsed_seconds,
+        "seed_time_required": seed_time_required_seconds,
+        "seed_time_remaining": seed_time_remaining_seconds,
     }
 
 
@@ -49,8 +70,14 @@ async def downloads_fragment(
     session: Session = Depends(get_session),
     user: DetailedUser = Security(ABRAuth()),
 ):
+    from app.internal.models import DownloadJobStatus
+
+    # Exclude completed jobs - those are shown in history
     jobs = session.exec(
-        select(DownloadJob).order_by(desc(DownloadJob.created_at)).limit(100)
+        select(DownloadJob)
+        .where(DownloadJob.status != DownloadJobStatus.completed)
+        .order_by(desc(DownloadJob.created_at))
+        .limit(100)
     ).all()
     serialized = [_serialize_job(j) for j in jobs]
     return template_response(
@@ -65,9 +92,12 @@ async def downloads_fragment(
 async def delete_download(
     job_id: str,
     request: Request,
+    from_history: bool = False,
     session: Session = Depends(get_session),
     user: DetailedUser = Security(ABRAuth()),
 ):
+    from app.internal.models import DownloadJobStatus
+
     try:
         job_uuid = uuid.UUID(job_id)
     except ValueError:
@@ -79,12 +109,27 @@ async def delete_download(
     session.delete(job)
     session.commit()
 
-    jobs = session.exec(
-        select(DownloadJob).order_by(desc(DownloadJob.created_at)).limit(100)
-    ).all()
+    # Return appropriate table based on source
+    if from_history:
+        jobs = session.exec(
+            select(DownloadJob)
+            .where(DownloadJob.status == DownloadJobStatus.completed)
+            .order_by(desc(DownloadJob.completed_at))
+            .limit(200)
+        ).all()
+        template = "components/downloads_history_table.html"
+    else:
+        jobs = session.exec(
+            select(DownloadJob)
+            .where(DownloadJob.status != DownloadJobStatus.completed)
+            .order_by(desc(DownloadJob.created_at))
+            .limit(100)
+        ).all()
+        template = "components/downloads_table.html"
+
     serialized = [_serialize_job(j) for j in jobs]
     return template_response(
-        "components/downloads_table.html",
+        template,
         request,
         user,
         {"jobs": serialized},
@@ -111,4 +156,40 @@ async def reprocess_download(
         user,
         {"jobs": serialized},
     )
-import uuid
+
+
+@router.get("/downloads/history")
+async def downloads_history(
+    request: Request,
+    user: DetailedUser = Security(ABRAuth()),
+):
+    return template_response(
+        "downloads_history.html",
+        request,
+        user,
+        {},
+    )
+
+
+@router.get("/downloads/history/fragment")
+async def downloads_history_fragment(
+    request: Request,
+    session: Session = Depends(get_session),
+    user: DetailedUser = Security(ABRAuth()),
+):
+    from app.internal.models import DownloadJobStatus
+
+    # Show completed jobs that are no longer actively seeding
+    jobs = session.exec(
+        select(DownloadJob)
+        .where(DownloadJob.status == DownloadJobStatus.completed)
+        .order_by(desc(DownloadJob.completed_at))
+        .limit(200)
+    ).all()
+    serialized = [_serialize_job(j) for j in jobs]
+    return template_response(
+        "components/downloads_history_table.html",
+        request,
+        user,
+        {"jobs": serialized},
+    )
