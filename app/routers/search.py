@@ -186,11 +186,18 @@ async def add_request(
     region: Annotated[audible_region_type, Form()] = get_region_from_settings(),
     num_results: Annotated[int, Form()] = 20,
     redirect_to_home: Annotated[Optional[str], Form()] = None,
+    media_type: Annotated[str | None, Form()] = None,
     user: DetailedUser = Security(ABRAuth()),
 ):
     book = await get_book_by_asin(client_session, asin, region)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
+
+    try:
+        chosen_media = MediaType(media_type) if media_type else MediaType.audiobook
+    except Exception:
+        chosen_media = MediaType.audiobook
+    book.media_type = chosen_media
 
     # Check if already requested by anyone
     existing_any = session.exec(
@@ -200,6 +207,15 @@ async def add_request(
         )
     ).first()
     if existing_any:
+        if media_type and hasattr(existing_any, "media_type"):
+            try:
+                desired_media = MediaType(media_type)
+                if existing_any.media_type != desired_media:
+                    existing_any.media_type = desired_media
+                    session.add(existing_any)
+                    session.commit()
+            except Exception:
+                pass
         # If downloaded or has active job, short-circuit with toast
         if existing_any.downloaded:
             return template_response(
@@ -428,6 +444,7 @@ async def add_request_and_open_mam(
     session: Annotated[Session, Depends(get_session)],
     client_session: Annotated[ClientSession, Depends(get_connection)],
     region: Annotated[audible_region_type, Form()] = get_region_from_settings(),
+    media_type: Annotated[str | None, Form()] = None,
     user: DetailedUser = Security(ABRAuth()),
 ):
     """Create (or reuse) a BookRequest and redirect to MAM search with request_id."""
@@ -446,6 +463,11 @@ async def add_request_and_open_mam(
         )
     ).first()
 
+    try:
+        chosen_media = MediaType(media_type) if media_type else MediaType.audiobook
+    except Exception:
+        chosen_media = MediaType.audiobook
+
     # If any user already requested this ASIN, reuse that to avoid duplicates
     any_request = existing_request or session.exec(
         select(BookRequest).where(
@@ -453,8 +475,12 @@ async def add_request_and_open_mam(
         )
     ).first()
     if any_request:
+        if existing_request and existing_request.media_type != chosen_media:
+            existing_request.media_type = chosen_media
+            session.add(existing_request)
+            session.commit()
         return _redirect_with_hx(
-            f"/search/mam?q={quote_plus(any_request.title)}&request_id={any_request.id}"
+            f"/search/mam?q={quote_plus(any_request.title)}&request_id={any_request.id}&media={chosen_media.value}"
         )
 
     book_request = existing_request
@@ -471,7 +497,7 @@ async def add_request_and_open_mam(
         ).first()
         if any_request:
             return _redirect_with_hx(
-                f"/search/mam?q={quote_plus(any_request.title)}&request_id={any_request.id}"
+                f"/search/mam?q={quote_plus(any_request.title)}&request_id={any_request.id}&media={chosen_media.value}"
             )
 
         # Check if already in Audiobookshelf
@@ -482,6 +508,7 @@ async def add_request_and_open_mam(
             logger.debug("ABS check skipped", error=str(e))
 
         book.user_username = user.username
+        book.media_type = chosen_media
         try:
             session.add(book)
             session.commit()
@@ -498,7 +525,7 @@ async def add_request_and_open_mam(
         raise HTTPException(status_code=500, detail="Failed to create request")
 
     return _redirect_with_hx(
-        f"/search/mam?q={quote_plus(book_request.title)}&request_id={book_request.id}"
+        f"/search/mam?q={quote_plus(book_request.title)}&request_id={book_request.id}&media={chosen_media.value}"
     )
 
 
