@@ -1,41 +1,36 @@
 <!-- Book Card Component -->
 <div class="flex flex-col">
-    <form class="relative w-[8rem] h-[10rem] sm:w-[10rem] sm:h-[12rem] rounded-md overflow-hidden shadow shadow-black flex flex-col items-stretch justify-start gap-1 p-1"
-          hx-post="{{ base_url }}/search/request/{{ book.asin }}"
-          hx-disabled-elt="button"
-          hx-target="#toast-block"
-          hx-swap="innerHTML">
-        <div class="relative w-full h-[7rem] sm:h-[8rem] overflow-hidden rounded">
-            {% if book.cover_image %}
-                <img class="object-cover w-full h-full hover:scale-110 transition-transform duration-500 ease-in-out"
-                     height="128"
-                     width="128"
-                     src="{{ book.cover_image }}"
-                     alt="{{ book.title }}" />
+    <div class="relative w-[8rem] h-[8rem] sm:w-[10rem] sm:h-[10rem] rounded-md overflow-hidden shadow shadow-black items-center justify-center flex">
+        {% if book.cover_image %}
+            <img class="object-cover w-full h-full hover:scale-110 transition-transform duration-500 ease-in-out"
+                 height="128"
+                 width="128"
+                 src="{{ book.cover_image }}"
+                 alt="{{ book.title }}" />
+        {% else %}
+            {% include "icons/photo-off.html" %}
+        {% endif %}
+        
+        <!-- Request Button -->
+        <button class="absolute top-0 right-0 rounded-none rounded-bl-md btn-sm btn btn-square items-center justify-center flex {% if book.downloaded or book.already_requested %}btn-ghost bg-success text-neutral/20{% else %}btn-info{% endif %}"
+                hx-post="{{ base_url }}/search/request/{{ book.asin }}"
+                hx-disabled-elt="this"
+                hx-target="closest div.flex"
+                hx-swap="outerHTML"
+                hx-on:click="this.disabled = true;"
+                {% if book.downloaded or book.already_requested %}disabled{% endif %}>
+            <input type="hidden" name="redirect_to_home" value="true" />
+            {% if book.downloaded or book.already_requested %}
+                <span>{% include "icons/checkmark.html" %}</span>
             {% else %}
-                {% include "icons/photo-off.html" %}
-            {% endif %}
-            
-            <!-- Request Button -->
-            <button type="submit" class="absolute top-0 right-0 rounded-none rounded-bl-md btn-sm btn btn-square items-center justify-center flex {% if book.downloaded or book.already_requested %}btn-ghost bg-success text-neutral/20{% else %}btn-info{% endif %}"
-                    {% if book.downloaded or book.already_requested %}disabled{% endif %}>
-                {% if book.downloaded or book.already_requested %}
-                    <span>{% include "icons/checkmark.html" %}</span>
+                {% if auto_start_download and user.can_download() %}
+                    <span>{% include "icons/download.html" %}</span>
                 {% else %}
-                    {% if auto_start_download and user.can_download() %}
-                        <span>{% include "icons/download.html" %}</span>
-                    {% else %}
-                        <span>{% include "icons/plus.html" %}</span>
-                    {% endif %}
+                    <span>{% include "icons/plus.html" %}</span>
                 {% endif %}
-            </button>
-        </div>
-        <select name="media_type" class="select select-bordered select-xs w-full">
-            <option value="audiobook">Audiobook</option>
-            <option value="ebook">Ebook</option>
-        </select>
-        <input type="hidden" name="redirect_to_home" value="true" />
-    </form>
+            {% endif %}
+        </button>
+    </div>
     
     <!-- Book Info -->
     {% if book.asin %}
@@ -90,7 +85,6 @@
     <form class="mt-1"
           hx-post="{{ base_url }}/search/request/{{ book.asin }}/mam"
           hx-swap="none">
-        <input type="hidden" name="media_type" value="audiobook" />
         <button type="submit" class="link link-primary text-[0.7rem]">
           Check on MAM →
         </button>
