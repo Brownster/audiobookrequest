@@ -3,7 +3,7 @@
     <form class="relative w-[8rem] h-[10rem] sm:w-[10rem] sm:h-[12rem] rounded-md overflow-hidden shadow shadow-black flex flex-col items-stretch justify-start gap-1 p-1"
           hx-post="{{ base_url }}/search/request/{{ book.asin }}"
           hx-disabled-elt="button"
-          hx-target="closest div.flex"
+          hx-target="#toast-block"
           hx-swap="outerHTML">
         <div class="relative w-full h-[7rem] sm:h-[8rem] overflow-hidden rounded">
             {% if book.cover_image %}
