@@ -15,12 +15,16 @@ from torf import Torrent as TorfTorrent
 
 from app.util.log import logger
 from app.util.db import open_session
-from app.internal.models import DownloadJob, DownloadJobStatus, BookRequest
+from app.internal.models import DownloadJob, DownloadJobStatus, BookRequest, MediaType
 from app.internal.clients.mam import MamClientSettings, MyAnonamouseClient
 from app.internal.clients.torrent.abstract import AbstractTorrentClient
 from app.internal.clients.torrent.transmission import TransmissionClient
 from app.internal.clients.torrent.qbittorrent import QbitClient
-from app.internal.processing.postprocess import PostProcessor, PostProcessingError
+from app.internal.processing.postprocess import (
+    PostProcessor,
+    PostProcessingError,
+    EbookPostProcessor,
+)
 from app.internal.services.seeding import build_seed_configuration, TorrentSeedConfiguration
 from app.internal.env_settings import Settings
 from app.internal.indexers.configuration import create_valued_configuration
@@ -56,9 +60,12 @@ class DownloadManager:
         self.mam_client: Optional[MyAnonamouseClient] = None
         self.torrent_client: Optional[AbstractTorrentClient] = None
         self.postprocessor: Optional[PostProcessor] = None
+        self.ebook_postprocessor: Optional[EbookPostProcessor] = None
         
         # Settings placeholders (should be loaded from config)
-        self.download_dir = Settings().app.download_dir if hasattr(Settings().app, "download_dir") else "/tmp/abr/audiobooks/"
+        settings = Settings().app
+        self.download_dir = getattr(settings, "download_dir", "/tmp/abr/audiobooks")
+        self.book_dir = getattr(settings, "book_dir", "/tmp/abr/books")
         self.postprocess_tmp_dir = "/tmp/abr/mam-service"
         self.transmission_url = "http://transmission:9091/transmission/rpc"
         self.mam_session_id = ""
@@ -77,6 +84,7 @@ class DownloadManager:
         
         # Ensure directories exist
         self.download_dir = str(_ensure_directory(self.download_dir))
+        self.book_dir = str(_ensure_directory(self.book_dir))
         self.postprocess_tmp_dir = str(_ensure_directory(self.postprocess_tmp_dir))
 
         # Initialize PostProcessor
@@ -84,6 +92,11 @@ class DownloadManager:
             output_dir=Path(self.download_dir), # This should be the final destination
             tmp_dir=Path(self.postprocess_tmp_dir),
             http_session=self.http_session
+        )
+        self.ebook_postprocessor = EbookPostProcessor(
+            output_dir=Path(self.book_dir),
+            tmp_dir=Path(self.postprocess_tmp_dir),
+            http_session=self.http_session,
         )
 
         # Preload settings and test torrent client connection if possible
@@ -738,8 +751,16 @@ class DownloadManager:
                         raise PostProcessingError(
                             "No download path reported by the torrent client. Set the qB Remote/Local path mapping in Settings ▸ MAM so files can be located."
                         )
+                    processor = (
+                        self.ebook_postprocessor
+                        if job.media_type == MediaType.ebook
+                        else self.postprocessor
+                    )
+                    if not processor:
+                        raise PostProcessingError("Post-processor not initialized")
+
                     destination = await asyncio.wait_for(
-                        self.postprocessor.process(str(job.id), request, snapshot),
+                        processor.process(str(job.id), request, snapshot),
                         timeout=30 * 60,  # 30 minutes
                     )
                     # Keep status as seeding to reflect ongoing seeding on private trackers

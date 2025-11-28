@@ -38,17 +38,29 @@
       </div>
     {% endif %}
     <div class="flex flex-col gap-4 justify-start items-center w-full max-w-6xl">
-      <form class="flex items-start w-full join" onsubmit="onSearch(); return false;">
-        <input name="q"
-               class="input join-item focus:z-10 w-full"
-               placeholder="Search MAM..."
-               value="{{ search_term }}"
-               autofocus />
-        <input type="hidden" name="request_id" value="{{ request_id }}">
-        <button id="search" class="btn btn-primary join-item" type="submit">
-          <span id="search-text">Search</span>
-          <span id="search-spinner" class="loading hidden"></span>
-        </button>
+      <form class="flex flex-col gap-2 w-full" onsubmit="onSearch(); return false;">
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="media" value="audiobook" class="radio radio-primary" {% if media_type != 'ebook' %}checked{% endif %} />
+            <span>Audiobooks</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="media" value="ebook" class="radio radio-primary" {% if media_type == 'ebook' %}checked{% endif %} />
+            <span>Ebooks</span>
+          </label>
+        </div>
+        <div class="flex items-start w-full join">
+          <input name="q"
+                 class="input join-item focus:z-10 w-full"
+                 placeholder="Search MAM..."
+                 value="{{ search_term }}"
+                 autofocus />
+          <input type="hidden" name="request_id" value="{{ request_id }}">
+          <button id="search" class="btn btn-primary join-item" type="submit">
+            <span id="search-text">Search</span>
+            <span id="search-spinner" class="loading hidden"></span>
+          </button>
+        </div>
       </form>
 
       {% if search_results %}
@@ -71,7 +83,7 @@
                   <button class="absolute top-0 right-0 rounded-none rounded-bl-md btn-sm btn btn-square items-center justify-center flex btn-info"
                           {% if not request_id %}disabled{% endif %}
                           hx-post="{{ base_url }}/search/mam/download"
-                          hx-vals='{"torrent_id": "{{ result.source.raw.id }}", "title": {{ result.title | tojson }}{% if request_id %}, "request_id": "{{ request_id }}"{% endif %}}'
+                          hx-vals='{"torrent_id": "{{ result.source.raw.id }}", "title": {{ result.title | tojson }}, "media_type": "{{ media_type | default("audiobook") }}"{% if request_id %}, "request_id": "{{ request_id }}"{% endif %}}'
                           hx-swap="outerHTML">
                     {% include "icons/download.html" %}
                   </button>

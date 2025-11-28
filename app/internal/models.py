@@ -28,6 +28,11 @@ class DownloadJobStatus(str, Enum):
     failed = "failed"
 
 
+class MediaType(str, Enum):
+    audiobook = "audiobook"
+    ebook = "ebook"
+
+
 class User(BaseModel, table=True):
     username: str = Field(primary_key=True)
     password: str
@@ -109,6 +114,10 @@ class BookRequest(BaseBook, table=True):
     """
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    media_type: MediaType = Field(
+        default=MediaType.audiobook,
+        sa_column_kwargs={"server_default": MediaType.audiobook.value},
+    )
     user_username: Optional[str] = Field(
         default=None, foreign_key="user.username", ondelete="CASCADE"
     )
@@ -265,6 +274,10 @@ class APIKey(BaseModel, table=True):
 class DownloadJob(BaseModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     request_id: Optional[uuid.UUID] = Field(default=None, foreign_key="bookrequest.id")
+    media_type: MediaType = Field(
+        default=MediaType.audiobook,
+        sa_column_kwargs={"server_default": MediaType.audiobook.value},
+    )
     status: DownloadJobStatus = Field(default=DownloadJobStatus.pending)
     title: str
     provider: str = "transmission"

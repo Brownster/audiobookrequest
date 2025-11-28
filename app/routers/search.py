@@ -50,7 +50,7 @@ from app.util.recommendations import get_homepage_recommendations
 from app.util.templates import template_response
 from app.internal.clients.mam import MyAnonamouseClient, MamClientSettings
 from app.internal.services.download_manager import DownloadManager
-from app.internal.models import DownloadJob, DownloadJobStatus
+from app.internal.models import DownloadJob, DownloadJobStatus, MediaType
 from app.internal.env_settings import Settings
 from app.internal.indexers.configuration import indexer_configuration_cache
 from app.util.log import logger
@@ -508,6 +508,7 @@ async def read_mam_search(
     session: Annotated[Session, Depends(get_session)],
     query: Annotated[Optional[str], Query(alias="q")] = None,
     request_id: Annotated[Optional[uuid.UUID], Query()] = None,
+    media_type: Annotated[MediaType | None, Query(alias="media")] = MediaType.audiobook,
     user: DetailedUser = Security(ABRAuth()),
 ):
     results = []
@@ -529,18 +530,20 @@ async def read_mam_search(
                 {
                     "search_term": query or "",
                     "search_results": [],
-                    "error": "MAM Session ID not configured."
+                    "error": "MAM Session ID not configured.",
+                    "media_type": (media_type or MediaType.audiobook).value,
                 },
             )
 
         settings = MamClientSettings(
-             mam_session_id=mam_session_id,
-             use_mock_data=use_mock
+            mam_session_id=mam_session_id,
+            use_mock_data=use_mock,
         )
-        
+
         client = MyAnonamouseClient(client_session, settings)
         try:
-            raw_results = await client.search(query)
+            categories = [13] if media_type == MediaType.audiobook else [14]
+            raw_results = await client.search(query, categories=categories)
             results = normalize_mam_results(raw_results)
         except Exception as e:
             logger.error("MAM search failed", error=str(e))
@@ -551,7 +554,8 @@ async def read_mam_search(
                 {
                     "search_term": query or "",
                     "search_results": [],
-                    "error": f"Search failed: {e}"
+                    "error": f"Search failed: {e}",
+                    "media_type": (media_type or MediaType.audiobook).value,
                 },
             )
 
@@ -563,6 +567,7 @@ async def read_mam_search(
             "search_term": query or "",
             "search_results": results,
             "request_id": request_id,
+            "media_type": (media_type or MediaType.audiobook).value,
         },
     )
 
@@ -572,6 +577,7 @@ async def download_mam(
     request: Request,
     torrent_id: Annotated[str, Form()],
     title: Annotated[str, Form()],
+    media_type: Annotated[str | None, Form()] = None,
     session: Annotated[Session, Depends(get_session)],
     user: DetailedUser = Security(ABRAuth()),
     request_id: Annotated[str | None, Form()] = None,
@@ -637,12 +643,18 @@ async def download_mam(
         )
 
     # Create DownloadJob
+    job_media_raw = media_type or getattr(book_request, "media_type", MediaType.audiobook.value)
+    try:
+        job_media_type = MediaType(job_media_raw)
+    except Exception:
+        job_media_type = MediaType.audiobook
     job = DownloadJob(
         request_id=book_request.id,
         title=title,
         torrent_id=torrent_id,
         status=DownloadJobStatus.pending,
-        message="Queued for download"
+        message="Queued for download",
+        media_type=job_media_type,
     )
     session.add(job)
     session.commit()

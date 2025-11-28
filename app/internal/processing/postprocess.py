@@ -117,6 +117,102 @@ class PostProcessor:
         await self._cleanup_tmp()
         return destination
 
+
+class EbookPostProcessor:
+    """Lightweight processor for ebook downloads (no audio merge)."""
+
+    PREFERRED_EXTS = [".epub", ".mobi", ".azw3", ".pdf", ".txt"]
+
+    def __init__(
+        self,
+        output_dir: Path,
+        tmp_dir: Path,
+        http_session: Optional[ClientSession] = None,
+    ):
+        self.output_dir = output_dir
+        self.tmp_dir = tmp_dir
+        self.http_session = http_session
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    async def process(self, job_id: str, request: BookRequest, torrent_snapshot: dict) -> Path:
+        download_dir = Path(torrent_snapshot.get("downloadDir", ""))
+        if not download_dir.exists() and download_dir.parent.exists():
+            download_dir = download_dir.parent
+
+        files = torrent_snapshot.get("files", []) or []
+        candidate = self._find_best_file(download_dir, files)
+        if not candidate:
+            raise PostProcessingError("No ebook file found to process.")
+
+        authors = request.authors or ["Unknown Author"]
+        safe_author = _sanitize_component(authors[0], "Unknown Author")
+        safe_title = _sanitize_component(request.title, "Book")
+        dest_dir = self.output_dir / safe_author / safe_title
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        dest_path = dest_dir / f"{safe_title}{candidate.suffix.lower()}"
+        if dest_path.exists():
+            dest_path = dest_dir / f"{safe_title}_{str(job_id)[:8]}{candidate.suffix.lower()}"
+
+        await asyncio.to_thread(shutil.copy2, candidate, dest_path)
+        await self._write_metadata(dest_dir, request)
+
+        cover_path = await self._download_cover(request.cover_image)
+        if cover_path:
+            final_cover = dest_dir / "cover.jpg"
+            cover_path.replace(final_cover)
+
+        return dest_path
+
+    def _find_best_file(self, download_dir: Path, files: list[dict]) -> Optional[Path]:
+        # Prefer torrent-reported file list first
+        ordered: list[Path] = []
+        for entry in files:
+            name = entry.get("name")
+            if not isinstance(name, str):
+                continue
+            path = download_dir / name
+            ordered.append(path)
+
+        if download_dir.exists():
+            for ext in self.PREFERRED_EXTS:
+                matches = list(download_dir.rglob(f"*{ext}"))
+                if matches:
+                    ordered.extend(matches)
+
+        for ext in self.PREFERRED_EXTS:
+            for candidate in ordered:
+                if candidate.suffix.lower() == ext and candidate.exists():
+                    return candidate
+        return None
+
+    async def _write_metadata(self, dest_dir: Path, request: BookRequest) -> None:
+        payload = {
+            "title": request.title,
+            "authors": request.authors,
+            "narrators": request.narrators,
+            "asin": request.asin,
+            "publishDate": request.release_date.isoformat() if request.release_date else None,
+            "cover": request.cover_image,
+        }
+        meta_path = dest_dir / "metadata.json"
+        meta_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    async def _download_cover(self, url: Optional[str]) -> Optional[Path]:
+        if not url or not self.http_session:
+            return None
+        try:
+            async with self.http_session.get(url) as resp:
+                if not resp.ok:
+                    return None
+                data = await resp.read()
+        except Exception as exc:
+            logger.debug("PostProcessor: cover fetch failed", error=str(exc))
+            return None
+        cover_path = self.tmp_dir / f"cover_{os.getpid()}.jpg"
+        cover_path.write_bytes(data)
+        return cover_path
     def _normalize(self, value: str) -> str:
         return "".join(c for c in value.lower() if c.isalnum())
 
