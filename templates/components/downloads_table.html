@@ -35,6 +35,8 @@
                   <span class="badge {{ badge }} gap-2 capitalize">{{ status }}</span>
                   {% if job.client_state %}
                     <span class="badge badge-outline badge-xs">{{ job.client_state }}</span>
+                  {% elif job.message and job.message|lower|slice(0,9) == 'qb state:' %}
+                    <span class="badge badge-outline badge-xs">{{ job.message }}</span>
                   {% endif %}
                 </div>
               </td>
