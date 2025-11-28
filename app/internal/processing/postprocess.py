@@ -345,36 +345,6 @@ class EbookPostProcessor:
             "display_name": display_name,
         }
 
-    def _extract_metadata(self, request: BookRequest) -> dict:
-        title = request.title
-        authors = request.authors or []
-        narrators = request.narrators or []
-        
-        primary_author = authors[0] if authors else ""
-        display_name = f"{primary_author} - {title}" if primary_author else title
-
-        ffmpeg_tags = {
-            "title": title,
-            "album": title,
-            "artist": ", ".join(narrators or authors),
-            "album_artist": primary_author or ", ".join(authors),
-            "composer": ", ".join(narrators) if narrators else None,
-            # "comment": request.description, # BookRequest doesn't have description yet, maybe add it?
-        }
-        
-        return {
-            "title": title,
-            "authors": authors,
-            "narrators": narrators,
-            # "series": request.series, # Not in BookRequest
-            "asin": request.asin,
-            # "description": request.description,
-            "cover_url": request.cover_image,
-            "publish_date": request.release_date.isoformat() if request.release_date else None,
-            "ffmpeg_tags": ffmpeg_tags,
-            "display_name": display_name,
-        }
-
     async def _write_metadata_file(self, destination: Path, metadata: dict) -> None:
         if not metadata.get("title"):
             return
@@ -456,11 +426,70 @@ class EbookPostProcessor:
         cover_path.write_bytes(data)
         return cover_path
 
-    async def _cleanup_tmp(self) -> None:
-        try:
-            for p in self.tmp_dir.glob("ffmpeg_concat_*"):
-                p.unlink(missing_ok=True)
-            for p in self.tmp_dir.glob("cover_*"):
-                p.unlink(missing_ok=True)
-        except Exception as exc:
-            logger.debug("PostProcessor: tmp cleanup skipped", error=str(exc))
+async def _cleanup_tmp(self) -> None:
+    try:
+        for p in self.tmp_dir.glob("ffmpeg_concat_*"):
+            p.unlink(missing_ok=True)
+        for p in self.tmp_dir.glob("cover_*"):
+            p.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.debug("PostProcessor: tmp cleanup skipped", error=str(exc))
+        
+
+# Fallback: bind _extract_metadata to the class if missing (defensive against reload issues)
+def _pp_extract_metadata(self, request: BookRequest) -> dict:
+    title = request.title or "Untitled"
+    authors = request.authors or ["Unknown Author"]
+    narrators = request.narrators or []
+    primary_author = authors[0] if authors else ""
+    display_name = f"{primary_author} - {title}" if primary_author else title
+    ffmpeg_tags = {
+        "title": title,
+        "album": title,
+        "artist": ", ".join(narrators or authors),
+        "album_artist": primary_author or ", ".join(authors),
+        "composer": ", ".join(narrators) if narrators else None,
+    }
+    return {
+        "title": title,
+        "authors": authors,
+        "narrators": narrators,
+        "asin": request.asin,
+        "cover_url": request.cover_image,
+        "publish_date": request.release_date.isoformat() if request.release_date else None,
+        "ffmpeg_tags": ffmpeg_tags,
+        "display_name": display_name,
+    }
+
+# Attach if missing
+try:
+    if not hasattr(PostProcessor, "_extract_metadata"):
+        PostProcessor._extract_metadata = _pp_extract_metadata  # type: ignore[attr-defined]
+except NameError:
+    pass
+
+    def _extract_metadata(self, request: BookRequest) -> dict:
+        title = request.title or "Untitled"
+        authors = request.authors or ["Unknown Author"]
+        narrators = request.narrators or []
+        primary_author = authors[0] if authors else ""
+        display_name = f"{primary_author} - {title}" if primary_author else title
+
+        ffmpeg_tags = {
+            "title": title,
+            "album": title,
+            "artist": ", ".join(narrators or authors),
+            "album_artist": primary_author or ", ".join(authors),
+            "composer": ", ".join(narrators) if narrators else None,
+        }
+
+        return {
+            "title": title,
+            "authors": authors,
+            "narrators": narrators,
+            "asin": request.asin,
+            "cover_url": request.cover_image,
+            "publish_date": request.release_date.isoformat() if request.release_date else None,
+            "ffmpeg_tags": ffmpeg_tags,
+            "display_name": display_name,
+        }
