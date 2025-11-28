@@ -468,6 +468,56 @@ try:
 except NameError:
     pass
 
+# Fallback: bind other helper methods if missing (defensive against reload issues)
+def _pp_find_source_fallback(self, download_dir: Path, name: str, files: list[dict]) -> Optional[Path]:
+    for f in files or []:
+        rel = f.get("name")
+        if not isinstance(rel, str):
+            continue
+        parts = Path(rel).parts
+        if parts:
+            candidate = download_dir / parts[0]
+            if candidate.exists():
+                return candidate
+    target = self._normalize(name)
+    try:
+        for entry in download_dir.iterdir():
+            if self._normalize(entry.name) == target:
+                return entry
+    except FileNotFoundError:
+        return None
+    return None
+
+def _pp_gather_audio_files(self, base_dir: Path, files: Iterable[dict]) -> List[Path]:
+    audio_paths: List[Path] = []
+    for f in files:
+        name = f.get("name")
+        if not isinstance(name, str):
+            continue
+        path = base_dir / name
+        if path.suffix.lower() in AUDIO_EXTENSIONS and path.exists():
+            audio_paths.append(path)
+    audio_paths.sort()
+    return audio_paths
+
+def _pp_find_audio_files_recursive(self, base_dir: Path) -> List[Path]:
+    found: List[Path] = []
+    for ext in AUDIO_EXTENSIONS:
+        found.extend(base_dir.rglob(f"*{ext}"))
+    found = [p for p in found if p.is_file()]
+    found.sort()
+    return found
+
+try:
+    if not hasattr(PostProcessor, "_find_source_fallback"):
+        PostProcessor._find_source_fallback = _pp_find_source_fallback  # type: ignore[attr-defined]
+    if not hasattr(PostProcessor, "_gather_audio_files"):
+        PostProcessor._gather_audio_files = _pp_gather_audio_files  # type: ignore[attr-defined]
+    if not hasattr(PostProcessor, "_find_audio_files_recursive"):
+        PostProcessor._find_audio_files_recursive = _pp_find_audio_files_recursive  # type: ignore[attr-defined]
+except NameError:
+    pass
+
     def _extract_metadata(self, request: BookRequest) -> dict:
         title = request.title or "Untitled"
         authors = request.authors or ["Unknown Author"]
