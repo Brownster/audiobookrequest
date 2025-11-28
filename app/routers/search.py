@@ -193,6 +193,13 @@ async def add_request(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
+    # Ensure required fields are populated to satisfy DB constraints
+    book.asin = book.asin or asin
+    book.title = book.title or query or "Untitled"
+    book.release_date = book.release_date or datetime.utcnow()
+    book.runtime_length_min = book.runtime_length_min or 0
+    book.authors = book.authors or ["Unknown Author"]
+
     try:
         chosen_media = MediaType(media_type) if media_type else MediaType.audiobook
     except Exception:
