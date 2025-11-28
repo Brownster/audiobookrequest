@@ -56,7 +56,7 @@
                  placeholder="Search MAM..."
                  value="{{ search_term }}"
                  autofocus />
-          <input type="hidden" name="request_id" value="{{ request_id }}">
+          <input type="hidden" name="request_id" value="{{ request_id or '' }}">
           <button id="search" class="btn btn-primary join-item" type="submit">
             <span id="search-text">Search</span>
             <span id="search-spinner" class="loading hidden"></span>
