@@ -66,7 +66,9 @@ async def update_qbittorrent_settings(
     qbittorrent_local_path_prefix: Annotated[str | None, Form()] = None,
 ):
     def _set(key: str, value: str):
+        # Store with and without prefix for compatibility
         indexer_configuration_cache.set(session, f"MyAnonamouse_{key}", value)
+        indexer_configuration_cache.set(session, key, value)
 
     # Force qBittorrent as the client choice for MAM downloads
     _set("download_client", "qbittorrent")

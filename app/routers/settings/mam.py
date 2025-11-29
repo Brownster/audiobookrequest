@@ -49,7 +49,9 @@ async def update_mam_settings(
         raise ToastException("MAM session ID is required", "error")
 
     def _set(key: str, value: str):
+        # Store with and without prefix for compatibility
         indexer_configuration_cache.set(session, f"MyAnonamouse_{key}", value)
+        indexer_configuration_cache.set(session, key, value)
 
     _set("mam_session_id", mam_session_id.strip())
 
