@@ -208,7 +208,7 @@ class DownloadManager:
                 session.commit()
                 return
 
-            mam_session_id = config.mam_session_id
+            mam_session_id = config.mam_session_id or indexer_configuration_cache.get(session, "MyAnonamouse_mam_session_id")
             
             if not mam_session_id:
                 logger.error("DownloadManager: MAM session ID not configured")
@@ -226,7 +226,7 @@ class DownloadManager:
             self.mam_client = MyAnonamouseClient(self.http_session, mam_settings)
             
             # Init Torrent Client
-            client_type = config.download_client or "transmission"
+            client_type = config.download_client or ("qbittorrent" if config.qbittorrent_url else "transmission")
             if client_type == "qbittorrent":
                 qbit_url = config.qbittorrent_url or "http://qbittorrent:8080"
                 qbit_user = config.qbittorrent_username or ""
@@ -380,7 +380,7 @@ class DownloadManager:
                 try:
                     mam_config_def = await MamIndexer.get_configurations(container)
                     config = cast(ValuedMamConfigurations, create_valued_configuration(mam_config_def, session, check_required=False))
-                    client_type = config.download_client or "transmission"
+                    client_type = config.download_client or ("qbittorrent" if config.qbittorrent_url else "transmission")
                     if client_type == "qbittorrent":
                         self.torrent_client = QbitClient(
                             self.http_session,
@@ -455,7 +455,7 @@ class DownloadManager:
             except Exception:
                 return
 
-            mam_session_id = config.mam_session_id
+            mam_session_id = config.mam_session_id or indexer_configuration_cache.get(session, "MyAnonamouse_mam_session_id")
             if not mam_session_id:
                 return
 
@@ -527,12 +527,14 @@ class DownloadManager:
                     session.commit()
                     continue
 
+                client_type = config.download_client or ("qbittorrent" if config.qbittorrent_url else "transmission")
+
                 job = DownloadJob(
                     request_id=request.id,
                     title=best.title or request.title,
                     torrent_id=torrent_id,
                     status=DownloadJobStatus.pending,
-                    provider="qbittorrent",
+                    provider=client_type,
                     message="Queued via MAM retry",
                 )
                 request.mam_unavailable = False
