@@ -225,18 +225,11 @@ class DownloadManager:
             )
             self.mam_client = MyAnonamouseClient(self.http_session, mam_settings)
             
-            # Init Torrent Client
-            client_type = config.download_client or ("qbittorrent" if config.qbittorrent_url else "transmission")
-            if client_type == "qbittorrent":
-                qbit_url = config.qbittorrent_url or "http://qbittorrent:8080"
-                qbit_user = config.qbittorrent_username or ""
-                qbit_pass = config.qbittorrent_password or ""
-                self.torrent_client = QbitClient(self.http_session, qbit_url, qbit_user, qbit_pass)
-            else:
-                trans_url = config.transmission_url or "http://transmission:9091/transmission/rpc"
-                trans_user = config.transmission_username
-                trans_pass = config.transmission_password
-                self.torrent_client = TransmissionClient(self.http_session, trans_url, trans_user, trans_pass)
+            # Init Torrent Client (force qBittorrent)
+            qbit_url = config.qbittorrent_url or "http://qbittorrent:8080"
+            qbit_user = config.qbittorrent_username or ""
+            qbit_pass = config.qbittorrent_password or ""
+            self.torrent_client = QbitClient(self.http_session, qbit_url, qbit_user, qbit_pass)
 
             job.status = DownloadJobStatus.downloading
             job.message = "Downloading torrent metadata"
@@ -380,21 +373,12 @@ class DownloadManager:
                 try:
                     mam_config_def = await MamIndexer.get_configurations(container)
                     config = cast(ValuedMamConfigurations, create_valued_configuration(mam_config_def, session, check_required=False))
-                    client_type = config.download_client or ("qbittorrent" if config.qbittorrent_url else "transmission")
-                    if client_type == "qbittorrent":
-                        self.torrent_client = QbitClient(
-                            self.http_session,
-                            config.qbittorrent_url or "http://qbittorrent:8080",
-                            config.qbittorrent_username or "",
-                            config.qbittorrent_password or "",
-                        )
-                    else:
-                        self.torrent_client = TransmissionClient(
-                            self.http_session,
-                            config.transmission_url or "http://transmission:9091/transmission/rpc",
-                            config.transmission_username,
-                            config.transmission_password,
-                        )
+                    self.torrent_client = QbitClient(
+                        self.http_session,
+                        config.qbittorrent_url or "http://qbittorrent:8080",
+                        config.qbittorrent_username or "",
+                        config.qbittorrent_password or "",
+                    )
                 except Exception:
                     return
 
@@ -527,14 +511,12 @@ class DownloadManager:
                     session.commit()
                     continue
 
-                client_type = config.download_client or ("qbittorrent" if config.qbittorrent_url else "transmission")
-
                 job = DownloadJob(
                     request_id=request.id,
                     title=best.title or request.title,
                     torrent_id=torrent_id,
                     status=DownloadJobStatus.pending,
-                    provider=client_type,
+                    provider="qbittorrent",
                     message="Queued via MAM retry",
                 )
                 request.mam_unavailable = False
