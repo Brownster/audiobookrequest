@@ -639,6 +639,11 @@ async def download_mam(
                 parsed_authors = [str(a) for a in parsed if isinstance(a, str)]
         except Exception:
             parsed_authors = []
+    if not parsed_authors and title:
+        # Try to derive author from title pattern "Title - Author"
+        parts = title.split(" - ")
+        if len(parts) > 1:
+            parsed_authors = [parts[-1].strip()]
     book_request = None
     if request_id:
         try:
