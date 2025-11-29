@@ -66,6 +66,9 @@
                  class="input input-bordered w-full"
                  placeholder="/downloads"
                  value="{{ values.qbittorrent_remote_path_prefix }}">
+          <label class="label">
+            <span class="label-text-alt opacity-70">Where qBittorrent saves downloaded files</span>
+          </label>
         </div>
         <div class="form-control">
           <label class="label"><span class="label-text font-semibold">qB Local Path Prefix</span></label>
@@ -74,6 +77,9 @@
                  class="input input-bordered w-full"
                  placeholder="/mnt/seedbox/downloads"
                  value="{{ values.qbittorrent_local_path_prefix }}">
+          <label class="label">
+            <span class="label-text-alt opacity-70">Where app reads downloaded files from</span>
+          </label>
         </div>
       </div>
 
@@ -81,5 +87,46 @@
         <button type="submit" class="btn btn-primary">Save</button>
       </div>
     </form>
+
+    <div class="divider"></div>
+
+    <!-- Library Paths (Environment Variables) -->
+    <div>
+      <h2 class="text-xl font-bold mb-2">Library Paths</h2>
+      <p class="text-sm opacity-70 mb-4">Final destination for processed files. Set via environment variables (requires restart to change).</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="form-control">
+          <label class="label"><span class="label-text font-semibold">Audiobook Library</span></label>
+          <input type="text"
+                 class="input input-bordered w-full bg-base-200"
+                 value="{{ values.download_dir }}"
+                 readonly>
+          <label class="label">
+            <span class="label-text-alt opacity-70">Processed audiobooks saved here (DOWNLOAD_DIR)</span>
+          </label>
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text font-semibold">Ebook Library</span></label>
+          <input type="text"
+                 class="input input-bordered w-full bg-base-200"
+                 value="{{ values.book_dir }}"
+                 readonly>
+          <label class="label">
+            <span class="label-text-alt opacity-70">Processed ebooks saved here (BOOK_DIR)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="alert alert-info mt-4">
+        <svg class="w-6 h-6 stroke-current" fill="none" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <div class="text-sm">
+          <p><strong>For Docker users:</strong> Map these paths as volumes in your docker-compose.yml</p>
+          <p class="mt-1 font-mono text-xs">volumes:<br>  - /your/audiobooks:/tmp/abr/audiobooks<br>  - /your/ebooks:/mnt/storage/books</p>
+        </div>
+      </div>
+    </div>
   </div>
 {% endblock content %}

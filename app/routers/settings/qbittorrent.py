@@ -23,6 +23,10 @@ async def read_qbittorrent_settings(
     session: Annotated[Session, Depends(get_session)],
     admin_user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
+    from app.internal.env_settings import Settings
+
+    settings = Settings()
+
     values = {
         "qbittorrent_url": _get("qbittorrent_url", session),
         "qbittorrent_username": _get("qbittorrent_username", session),
@@ -32,6 +36,9 @@ async def read_qbittorrent_settings(
         "qbittorrent_seed_time": _get("qbittorrent_seed_time", session),
         "qbittorrent_remote_path_prefix": _get("qbittorrent_remote_path_prefix", session),
         "qbittorrent_local_path_prefix": _get("qbittorrent_local_path_prefix", session),
+        # Library paths (from environment variables)
+        "download_dir": settings.app.download_dir,
+        "book_dir": settings.app.book_dir,
     }
     return template_response(
         "settings_page/qbittorrent.html",
