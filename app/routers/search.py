@@ -578,10 +578,13 @@ async def read_mam_search(
         client = MyAnonamouseClient(client_session, settings)
         try:
             if media_type == MediaType.ebook:
-                ebook_cats = [c.tracker_id for c in CATEGORY_MAPPINGS if c.name.startswith("Ebooks")]
-                categories = ebook_cats or [14]
+                ebook_torznab = set()
+                for c in CATEGORY_MAPPINGS:
+                    if c.name.startswith("Ebooks"):
+                        ebook_torznab.update(c.torznab_ids)
+                categories = list(ebook_torznab) or [7000]
             else:
-                categories = [13]
+                categories = None  # default audiobook categories
             raw_results = await client.search(query, categories=categories)
             results = normalize_mam_results(raw_results)
             # Sort by seeders descending (most popular first)
