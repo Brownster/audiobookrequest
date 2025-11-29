@@ -9,6 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      ABR_APP__CONFIG_DIR: ${{ github.workspace }}/.abr_config
+      ABR_DB__SQLITE_PATH: db.sqlite
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,6 +25,10 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Prepare config dir
+        run: |
+          mkdir -p "$ABR_APP__CONFIG_DIR"
 
       - name: Install dependencies
         run: |
