@@ -172,6 +172,18 @@ class PostProcessor:
         if not files:
             raise PostProcessingError("No audio files provided for merging")
 
+        # If the target is an m4b and inputs are already m4b/m4a, avoid re-muxing (e.g., eac3 Atmos in mp4/m4b is unsupported)
+        if destination.suffix.lower() == ".m4b" and any(f.suffix.lower() in {".m4b", ".m4a"} for f in files):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(shutil.copy2, files[0], destination)
+            logger.info(
+                "PostProcessor: skipped ffmpeg merge for m4b inputs (copied first file)",
+                input_count=len(files),
+                source=str(files[0]),
+                output=str(destination),
+            )
+            return
+
         # Verify all files exist
         missing = [f for f in files if not f.exists()]
         if missing:
