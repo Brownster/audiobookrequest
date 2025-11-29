@@ -230,6 +230,7 @@ class DownloadManager:
             qbit_user = config.qbittorrent_username or ""
             qbit_pass = config.qbittorrent_password or ""
             self.torrent_client = QbitClient(self.http_session, qbit_url, qbit_user, qbit_pass)
+            client_type = "qbittorrent"
 
             job.status = DownloadJobStatus.downloading
             job.message = "Downloading torrent metadata"
