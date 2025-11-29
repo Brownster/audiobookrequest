@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block head %}
+  <title>Manual Import</title>
+{% endblock head %}
+{% block body %}
+  <div class="w-screen flex flex-col items-center justify-center p-6 sm:p-8 overflow-x-hidden gap-4">
+    <div class="w-full max-w-5xl flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold">Manual Import</h1>
+        <p class="text-sm opacity-70">Run AudioBookRequest post-processing on files already on disk.</p>
+      </div>
+      <a class="btn btn-ghost btn-sm" href="{{ base_url }}/downloads">Back to Downloads</a>
+    </div>
+
+    {% if error %}
+      <div class="alert alert-error w-full max-w-5xl">
+        <span>{{ error }}</span>
+      </div>
+    {% endif %}
+    {% if success %}
+      <div class="alert alert-success w-full max-w-5xl">
+        <span>{{ success }}</span>
+      </div>
+    {% endif %}
+
+    <div class="card w-full max-w-5xl bg-base-200 shadow">
+      <div class="card-body space-y-4">
+        <form class="space-y-4" method="post" action="{{ base_url }}/downloads/manual/preview">
+          <div class="form-control">
+            <label class="label"><span class="label-text font-semibold">Source path</span></label>
+            <input class="input input-bordered w-full" name="source_path" placeholder="/mnt/storage/imports/My Book" required value="{{ preview.path if preview else '' }}" />
+            <label class="label"><span class="label-text-alt opacity-70">Point to a file or folder containing the audiobook/ebook.</span></label>
+          </div>
+
+          <div class="form-control">
+            <label class="label"><span class="label-text font-semibold">Media type</span></label>
+            <div class="flex gap-4">
+              <label class="label cursor-pointer gap-2">
+                <input type="radio" name="media_type" value="audiobook" class="radio" {% if not preview or preview.media_type == 'audiobook' %}checked{% endif %}>
+                <span class="label-text">Audiobook</span>
+              </label>
+              <label class="label cursor-pointer gap-2">
+                <input type="radio" name="media_type" value="ebook" class="radio" {% if preview and preview.media_type == 'ebook' %}checked{% endif %}>
+                <span class="label-text">Ebook</span>
+              </label>
+            </div>
+          </div>
+
+          {% if preview %}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="form-control">
+                <label class="label"><span class="label-text font-semibold">Title</span></label>
+                <input class="input input-bordered w-full" name="title" value="{{ preview.title }}" />
+              </div>
+              <div class="form-control">
+                <label class="label"><span class="label-text font-semibold">Author(s)</span></label>
+                <input class="input input-bordered w-full" name="authors" value="{{ preview.authors }}" placeholder="Comma-separated" />
+              </div>
+            </div>
+            <div class="flex gap-3">
+              <button class="btn btn-ghost" type="submit">Update Preview</button>
+              <button class="btn btn-primary" formaction="{{ base_url }}/downloads/manual/import" type="submit">Import and Process</button>
+            </div>
+          {% else %}
+            <button class="btn btn-primary" type="submit">Preview</button>
+          {% endif %}
+        </form>
+      </div>
+    </div>
+
+    <div class="w-full max-w-5xl alert alert-info">
+      <div>
+        <p class="font-semibold">How it works</p>
+        <ul class="list-disc list-inside text-sm opacity-80">
+          <li>We copy/merge files into your configured library paths (audiobooks: DOWNLOAD_DIR, ebooks: BOOK_DIR).</li>
+          <li>We tag with the title/author you confirm. Covers are not fetched for manual imports.</li>
+          <li>Imported items appear in Downloads history as provider <code>manual</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+{% endblock body %}
