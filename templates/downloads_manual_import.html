@@ -28,9 +28,24 @@
         <form class="space-y-4" method="post" action="{{ base_url }}/downloads/manual/preview">
           <div class="form-control">
             <label class="label"><span class="label-text font-semibold">Source path</span></label>
-            <input class="input input-bordered w-full" name="source_path" placeholder="/mnt/storage/imports/My Book" required value="{{ preview.path if preview else '' }}" />
+            <div class="flex flex-col gap-2">
+              <input id="source-path" class="input input-bordered w-full" name="source_path" placeholder="/mnt/storage/imports/My Book" required value="{{ preview.path if preview else '' }}" />
+              <div class="flex gap-2">
+                <button class="btn btn-sm" type="button"
+                        hx-get="{{ base_url }}/downloads/manual/browse{% if browse_base %}?base={{ browse_base | urlencode }}{% endif %}"
+                        hx-target="#browse-results"
+                        hx-swap="innerHTML">
+                  Browse
+                </button>
+                {% if browse_base %}
+                  <span class="text-xs opacity-70">Base: {{ browse_base }}</span>
+                {% endif %}
+              </div>
+            </div>
             <label class="label"><span class="label-text-alt opacity-70">Point to a file or folder containing the audiobook/ebook.</span></label>
           </div>
+
+          <div id="browse-results" class="space-y-2"></div>
 
           <div class="form-control">
             <label class="label"><span class="label-text font-semibold">Media type</span></label>
@@ -79,4 +94,13 @@
       </div>
     </div>
   </div>
+
+  <script>
+    function fillImportPath(path) {
+      const input = document.getElementById('source-path');
+      if (input) {
+        input.value = path;
+      }
+    }
+  </script>
 {% endblock body %}

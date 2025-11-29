@@ -1,0 +1,22 @@
+{% if error %}
+  <div class="alert alert-error mb-3">{{ error }}</div>
+{% else %}
+  <div class="text-sm opacity-70 mb-2">Base: {{ base }}</div>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+    {% for entry in entries %}
+      <button type="button"
+              class="btn btn-sm justify-start"
+              onclick="fillImportPath('{{ entry.path }}')">
+        {% if entry.is_dir %}
+          📁
+        {% else %}
+          📄
+        {% endif %}
+        <span class="ml-2 truncate">{{ entry.name }}</span>
+      </button>
+    {% endfor %}
+  </div>
+  {% if entries|length == 0 %}
+    <div class="text-sm opacity-70">No entries found.</div>
+  {% endif %}
+{% endif %}

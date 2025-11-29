@@ -1,7 +1,9 @@
 import uuid
+from pathlib import Path
 from fastapi import APIRouter, Depends, Request, Security, HTTPException
 from sqlalchemy import desc
 from sqlmodel import Session, select
+import os
 
 from app.internal.auth.authentication import ABRAuth, DetailedUser
 from app.internal.models import DownloadJob, DownloadJobStatus, GroupEnum, MediaType, BookRequest
@@ -94,11 +96,12 @@ async def manual_import_form(
     request: Request,
     user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
+    browse_base = os.getenv("ABR_IMPORT_ROOT")
     return template_response(
         "downloads_manual_import.html",
         request,
         user,
-        {"preview": None, "error": None},
+        {"preview": None, "error": None, "browse_base": browse_base},
     )
 
 
@@ -167,7 +170,7 @@ async def manual_import_preview(
         "downloads_manual_import.html",
         request,
         user,
-        {"preview": preview, "error": error},
+        {"preview": preview, "error": error, "browse_base": os.getenv("ABR_IMPORT_ROOT")},
     )
 
 
@@ -277,7 +280,59 @@ async def manual_import_run(
             },
             "success": f"Imported to {dest}",
             "error": None,
+            "browse_base": os.getenv("ABR_IMPORT_ROOT"),
         },
+    )
+
+
+@router.get("/downloads/manual/browse")
+async def manual_import_browse(
+    request: Request,
+    session: Session = Depends(get_session),
+    base: str | None = None,
+    user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
+):
+    # Determine base from param or known config
+    base_path = Path(base).expanduser() if base else None
+    if not base_path:
+        # try qbit local prefix
+        from app.internal.indexers.configuration import indexer_configuration_cache
+
+        local_prefix = indexer_configuration_cache.get(session, "MyAnonamouse_qbittorrent_local_path_prefix")
+        if local_prefix:
+            base_path = Path(local_prefix).expanduser()
+    if not base_path:
+        return template_response(
+            "components/manual_import_browser.html",
+            request,
+            user,
+            {"entries": [], "base": None, "error": "No base path configured (set ABR_IMPORT_ROOT or qB Local Path Prefix)."},
+        )
+
+    entries: list[dict] = []
+    try:
+        with os.scandir(base_path) as it:
+            for entry in it:
+                if entry.name.startswith("."):
+                    continue
+                if entry.is_dir() or entry.is_file():
+                    entries.append({"name": entry.name, "path": str(Path(base_path) / entry.name), "is_dir": entry.is_dir()})
+                if len(entries) >= 50:
+                    break
+    except Exception as exc:
+        return template_response(
+            "components/manual_import_browser.html",
+            request,
+            user,
+            {"entries": [], "base": str(base_path), "error": f"Browse failed: {exc}"},
+        )
+
+    entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+    return template_response(
+        "components/manual_import_browser.html",
+        request,
+        user,
+        {"entries": entries, "base": str(base_path), "error": None},
     )
 
 
