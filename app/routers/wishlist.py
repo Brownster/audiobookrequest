@@ -39,6 +39,8 @@ from app.internal.audiobookshelf.config import abs_config
 from app.internal.audiobookshelf.client import abs_trigger_scan
 from app.internal.query import query_sources
 from app.internal.services.download_manager import DownloadManager
+from app.internal.mam_normalizer import normalize_mam_results
+from app.internal.models import MediaType
 from app.util.connection import get_connection
 from app.util.db import get_session, open_session
 from app.util.redirect import BaseUrlRedirectResponse
@@ -520,17 +522,65 @@ async def auto_download_mam(
     if book_request.authors:
         query = f"{book_request.title} {', '.join(book_request.authors)}"
 
-    results = await mam_client.search(query, limit=40)
-    if not results:
+    results_raw = await mam_client.search(query, limit=40)
+    if not results_raw:
         book_request.mam_unavailable = True
         book_request.mam_last_check = datetime.utcnow()
         session.add(book_request)
         session.commit()
         return _render(toast_error="No MAM results found")
 
-    # Pick the best seeded result
-    best = max(results, key=lambda r: (r.seeders, r.peers, -r.size))
-    torrent_id = str(best.raw.get("id") or best.guid.split("-")[-1])
+    normalized = normalize_mam_results(results_raw)
+    target_media = book_request.media_type if hasattr(book_request, "media_type") else MediaType.audiobook
+    ebook_ext = {"epub", "mobi", "azw3", "pdf"}
+    audio_ext = {"m4b", "mp3", "flac", "aac", "ogg", "opus", "wav"}
+
+    def media_score(r):
+        ft = (r.filetype or "").lower()
+        if target_media == MediaType.ebook:
+            return 1 if ft in ebook_ext else 0
+        return 1 if ft in audio_ext or not ft else 0
+
+    def flag_score(r):
+        flags = [f.lower() for f in (r.flags or [])]
+        return (
+            1 if any(f in {"free", "freeleech", "personal_freeleech"} for f in flags) else 0,
+            1 if any("vip" in f for f in flags) else 0,
+        )
+
+    def author_score(r):
+        if not book_request.authors:
+            return 0
+        title_lower = (r.title or "").lower()
+        return 1 if any(a.lower() in title_lower for a in book_request.authors) else 0
+
+    def title_match(r):
+        t = (r.title or "").lower()
+        return 1 if (book_request.title or "").lower() in t else 0
+
+    best = max(
+        normalized,
+        key=lambda r: (
+            title_match(r),
+            author_score(r),
+            media_score(r),
+            *flag_score(r),
+            r.seeders,
+            r.leechers,
+            -r.size,
+        ),
+    )
+
+    src = getattr(best, "source", None) or getattr(best, "raw", None) or {}
+    torrent_id = None
+    if hasattr(src, "raw"):
+        torrent_id = src.raw.get("id") or None
+    if not torrent_id and hasattr(src, "guid"):
+        torrent_id = src.guid.split("-")[-1]
+    if not torrent_id and isinstance(src, dict):
+        torrent_id = src.get("id") or None
+    if not torrent_id:
+        torrent_id = getattr(best, "title", None) or None
     if not torrent_id:
         book_request.mam_unavailable = True
         book_request.mam_last_check = datetime.utcnow()
