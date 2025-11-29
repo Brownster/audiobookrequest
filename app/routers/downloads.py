@@ -146,8 +146,8 @@ def _build_fake_snapshot(source: Path) -> dict:
 @router.post("/downloads/manual/preview")
 async def manual_import_preview(
     request: Request,
-    source_path: str,
-    media_type: str = "audiobook",
+    source_path: str = Form(...),
+    media_type: str = Form("audiobook"),
     user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
     from pathlib import Path
@@ -179,10 +179,10 @@ async def manual_import_run(
     request: Request,
     session: Session = Depends(get_session),
     user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
-    source_path: str = "",
-    media_type: str = "audiobook",
-    title: str = "",
-    authors: str = "",
+    source_path: str = Form(""),
+    media_type: str = Form("audiobook"),
+    title: str = Form(""),
+    authors: str = Form(""),
 ):
     import uuid
     from datetime import datetime
