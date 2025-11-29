@@ -29,7 +29,7 @@ class MamConfigurations(Configurations):
     download_client: IndexerConfiguration[str] = IndexerConfiguration(
         type=str,
         display_name="Download Client (transmission/qbittorrent)",
-        default="transmission",
+        default="qbittorrent",
         required=True,
     )
     transmission_url: IndexerConfiguration[str] = IndexerConfiguration(
