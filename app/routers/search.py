@@ -646,22 +646,42 @@ async def download_mam(
             book_request = session.get(BookRequest, request_uuid)
         except ValueError:
             book_request = None
-    # If no request provided, create a lightweight request so the job can proceed
+
+    # If no request provided, reuse existing asin/user row or create a lightweight request
     if not book_request:
-        book_request = BookRequest(
-            asin=f"mam-{torrent_id}",
-            title=title,
-            subtitle=None,
-            authors=parsed_authors or ["Unknown Author"],
-            narrators=[],
-            cover_image=cover_image,
-            release_date=datetime.utcnow(),
-            runtime_length_min=0,
-            user_username=user.username,
-            media_type=job_media_type,
+        existing_req = session.exec(
+            select(BookRequest).where(
+                BookRequest.asin == f"mam-{torrent_id}",
+                BookRequest.user_username == user.username,
+            )
+        ).first()
+        if existing_req:
+            book_request = existing_req
+        else:
+            book_request = BookRequest(
+                asin=f"mam-{torrent_id}",
+                title=title,
+                subtitle=None,
+                authors=parsed_authors or ["Unknown Author"],
+                narrators=[],
+                cover_image=cover_image,
+                release_date=datetime.utcnow(),
+                runtime_length_min=0,
+                user_username=user.username,
+                media_type=job_media_type,
+            )
+            session.add(book_request)
+            session.commit()
+
+    # Prevent duplicate requests for same asin/user
+    existing_req = session.exec(
+        select(BookRequest).where(
+            BookRequest.asin == book_request.asin,
+            BookRequest.user_username == user.username,
         )
-        session.add(book_request)
-        session.commit()
+    ).first()
+    if existing_req and existing_req.id != book_request.id:
+        book_request = existing_req
 
     # Prevent duplicate jobs for the same request/torrent in active states
     existing_job = session.exec(
