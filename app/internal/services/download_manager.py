@@ -109,10 +109,12 @@ class DownloadManager:
                 mam_config_def = await MamIndexer.get_configurations(container)
                 config = cast(ValuedMamConfigurations, create_valued_configuration(mam_config_def, session, check_required=False))
                 client_type = config.download_client or "transmission"
-                if client_type == "qbittorrent":
-                    qbit_url = config.qbittorrent_url or "http://qbittorrent:8080"
-                    qbit_user = config.qbittorrent_username or ""
-                    qbit_pass = config.qbittorrent_password or ""
+                # Prefer qBittorrent if URL is set; fall back to Transmission only if qB is not configured
+                qbit_url = getattr(config, "qbittorrent_url", None)
+                if client_type == "qbittorrent" or qbit_url:
+                    qbit_url = qbit_url or "http://qbittorrent:8080"
+                    qbit_user = getattr(config, "qbittorrent_username", "") or ""
+                    qbit_pass = getattr(config, "qbittorrent_password", "") or ""
                     self.torrent_client = QbitClient(self.http_session, qbit_url, qbit_user, qbit_pass)
                 else:
                     trans_url = config.transmission_url or "http://transmission:9091/transmission/rpc"
