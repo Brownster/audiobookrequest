@@ -1,6 +1,9 @@
+import asyncio
 import uuid
 from pathlib import Path
+from dataclasses import dataclass
 from fastapi import APIRouter, Depends, Request, Security, HTTPException
+from fastapi import Form
 from sqlalchemy import desc
 from sqlmodel import Session, select
 import os
@@ -14,6 +17,13 @@ from app.util.templates import template_response
 
 
 router = APIRouter()
+
+
+@dataclass
+class BookCandidate:
+    root: Path
+    title: str
+    authors: list[str]
 
 
 def _serialize_job(job: DownloadJob) -> dict:
@@ -122,7 +132,41 @@ def _parse_title_author_from_path(path: str) -> tuple[str, list[str]]:
     return name, []
 
 
-def _build_fake_snapshot(source: Path) -> dict:
+def _has_audio(path: Path) -> bool:
+    for ext in AUDIO_EXTENSIONS:
+        if any(path.rglob(f"*{ext}")):
+            return True
+    return False
+
+
+def _discover_books(base: Path, multi: bool) -> list[BookCandidate]:
+    """
+    If multi=True, treat each immediate subfolder containing audio as a separate book.
+    Otherwise treat the base as a single book.
+    """
+    candidates: list[BookCandidate] = []
+    if multi:
+        for child in sorted(p for p in base.iterdir() if p.is_dir()):
+            if not _has_audio(child):
+                continue
+            title, authors = _parse_title_author_from_path(child.name)
+            parent_author, _ = _parse_title_author_from_path(base.name)
+            if parent_author and not authors:
+                authors = [parent_author]
+            candidates.append(BookCandidate(root=child, title=title, authors=authors))
+        if candidates:
+            return candidates
+
+    # Fallback: single book at base
+    title, authors = _parse_title_author_from_path(base.name)
+    parent_author, _ = _parse_title_author_from_path(base.parent.name)
+    if parent_author and not authors:
+        authors = [parent_author]
+    candidates.append(BookCandidate(root=base, title=title, authors=authors))
+    return candidates
+
+
+def _build_fake_snapshot_sync(source: Path) -> dict:
     """Build a torrent_snapshot-like dict for the post-processors."""
     if source.is_file():
         download_dir = source.parent
@@ -143,27 +187,45 @@ def _build_fake_snapshot(source: Path) -> dict:
     }
 
 
+async def _build_fake_snapshot(source: Path) -> dict:
+    """Build a torrent_snapshot-like dict for the post-processors (async to avoid blocking)."""
+    return await asyncio.to_thread(_build_fake_snapshot_sync, source)
+
+
 @router.post("/downloads/manual/preview")
 async def manual_import_preview(
     request: Request,
     source_path: str = Form(...),
     media_type: str = Form("audiobook"),
+    multi_books: bool = Form(False),
     user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
+    import uuid
+    import asyncio
+    from datetime import datetime
     from pathlib import Path
+    from aiohttp import ClientSession
+
+    from app.internal.processing.postprocess import PostProcessor, EbookPostProcessor, PostProcessingError
+    from app.internal.env_settings import Settings
+    from app.util.log import logger
 
     path = Path(source_path).expanduser()
     error = None
     preview = None
-    if not path.exists():
+    books: list[BookCandidate] = []
+    if not await asyncio.to_thread(path.exists):
         error = f"Path does not exist: {path}"
     else:
-        title, authors = _parse_title_author_from_path(path.name)
+        books = _discover_books(path, multi_books)
+        first = books[0] if books else None
         preview = {
             "path": str(path),
             "media_type": media_type,
-            "title": title,
-            "authors": ", ".join(authors) if authors else "",
+            "title": first.title if first else path.stem,
+            "authors": ", ".join(first.authors) if first and first.authors else "",
+            "multi": multi_books,
+            "books": books,
         }
 
     return template_response(
@@ -181,91 +243,129 @@ async def manual_import_run(
     user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
     source_path: str = Form(""),
     media_type: str = Form("audiobook"),
+    multi_books: bool = Form(False),
     title: str = Form(""),
     authors: str = Form(""),
 ):
-    import uuid
+    import asyncio
     from datetime import datetime
-    from pathlib import Path
+    from aiohttp import ClientSession
 
     from app.internal.processing.postprocess import PostProcessor, EbookPostProcessor, PostProcessingError
     from app.internal.env_settings import Settings
+    from app.util.log import logger
+
+    logger.info("Manual import started", source_path=source_path, media_type=media_type, multi=multi_books)
 
     path = Path(source_path).expanduser()
-    if not path.exists():
+    if not await asyncio.to_thread(path.exists):
         return template_response(
             "downloads_manual_import.html",
             request,
             user,
-            {"preview": None, "error": f"Path does not exist: {path}"},
+            {"preview": None, "error": f"Path does not exist: {path}", "browse_base": os.getenv("ABR_IMPORT_ROOT")},
         )
 
-    parsed_title, parsed_authors = _parse_title_author_from_path(path.name)
-    final_title = title.strip() or parsed_title or path.stem
-    author_list = [a.strip() for a in authors.split(",") if a.strip()] or parsed_authors or ["Unknown Author"]
+    books = _discover_books(path, multi_books)
+    if not books:
+        return template_response(
+            "downloads_manual_import.html",
+            request,
+            user,
+            {"preview": None, "error": "No audio files found.", "browse_base": os.getenv("ABR_IMPORT_ROOT")},
+        )
 
-    job_id = uuid.uuid4()
     settings = Settings().app
     tmp_dir = Path("/tmp/abr/manual-import")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     media_enum = MediaType(media_type)
+    successes: list[str] = []
 
-    # Build a lightweight BookRequest surrogate for tagging
-    book = BookRequest(
-        asin=f"manual-{job_id}",
-        title=final_title,
-        subtitle=None,
-        authors=author_list,
-        narrators=[],
-        cover_image=None,
-        release_date=datetime.utcnow(),
-        runtime_length_min=0,
-        downloaded=True,
-        media_type=media_enum,
-    )
+    for candidate in books:
+        parsed_title, parsed_authors = _parse_title_author_from_path(candidate.root.name)
+        final_title = title.strip() or candidate.title or parsed_title or candidate.root.stem
+        author_list = [a.strip() for a in authors.split(",") if a.strip()] or candidate.authors or parsed_authors or ["Unknown Author"]
 
-    snapshot = _build_fake_snapshot(path)
-    try:
-        if media_enum == MediaType.ebook:
-            processor = EbookPostProcessor(Path(settings.book_dir), tmp_dir, None)
-            dest = await processor.process(str(job_id), book, snapshot)
-        else:
-            processor = PostProcessor(Path(settings.download_dir), tmp_dir, enable_merge=True, http_session=None)
-            dest = await processor.process(str(job_id), book, snapshot)
-    except PostProcessingError as exc:
-        return template_response(
-            "downloads_manual_import.html",
-            request,
-            user,
-            {
-                "preview": {
-                    "path": str(path),
-                    "media_type": media_type,
-                    "title": final_title,
-                    "authors": ", ".join(author_list),
-                },
-                "error": f"Post-processing failed: {exc}",
-            },
+        job_id = uuid.uuid4()
+        book = BookRequest(
+            asin=f"manual-{job_id}",
+            title=final_title,
+            subtitle=None,
+            authors=author_list,
+            narrators=[],
+            cover_image=None,
+            release_date=datetime.utcnow(),
+            runtime_length_min=0,
+            downloaded=True,
+            media_type=media_enum,
         )
 
-    # Record as a completed manual job
-    job = DownloadJob(
-        id=job_id,
-        request_id=None,
-        media_type=media_enum,
-        status=DownloadJobStatus.completed,
-        title=final_title,
-        provider="manual",
-        torrent_id=None,
-        transmission_hash=None,
-        transmission_id=None,
-        seed_configuration={},
-        destination_path=str(dest),
-        message="Imported manually",
-        created_at=datetime.utcnow(),
-        completed_at=datetime.utcnow(),
-    )
-    session.add(job)
-    session.commit()
+        snapshot = await _build_fake_snapshot(candidate.root)
+
+        async with ClientSession() as http_session:
+            try:
+                if media_enum == MediaType.ebook:
+                    processor = EbookPostProcessor(Path(settings.book_dir), tmp_dir, http_session)
+                    dest = await asyncio.wait_for(processor.process(str(job_id), book, snapshot), timeout=300.0)
+                else:
+                    processor = PostProcessor(Path(settings.download_dir), tmp_dir, enable_merge=True, http_session=http_session)
+                    dest = await asyncio.wait_for(processor.process(str(job_id), book, snapshot), timeout=300.0)
+            except asyncio.TimeoutError:
+                return template_response(
+                    "downloads_manual_import.html",
+                    request,
+                    user,
+                    {
+                        "preview": {
+                            "path": str(path),
+                            "media_type": media_type,
+                            "title": final_title,
+                            "authors": ", ".join(author_list),
+                            "multi": multi_books,
+                            "books": books,
+                        },
+                        "error": "Post-processing timed out.",
+                        "browse_base": os.getenv("ABR_IMPORT_ROOT"),
+                    },
+                )
+            except PostProcessingError as exc:
+                return template_response(
+                    "downloads_manual_import.html",
+                    request,
+                    user,
+                    {
+                        "preview": {
+                            "path": str(path),
+                            "media_type": media_type,
+                            "title": final_title,
+                            "authors": ", ".join(author_list),
+                            "multi": multi_books,
+                            "books": books,
+                        },
+                        "error": f"Post-processing failed: {exc}",
+                        "browse_base": os.getenv("ABR_IMPORT_ROOT"),
+                    },
+                )
+
+        job = DownloadJob(
+            id=job_id,
+            request_id=None,
+            media_type=media_enum,
+            status=DownloadJobStatus.completed,
+            title=final_title,
+            provider="manual",
+            torrent_id=None,
+            transmission_hash=None,
+            transmission_id=None,
+            seed_configuration={},
+            destination_path=str(dest),
+            message="Imported manually",
+            created_at=datetime.utcnow(),
+            completed_at=datetime.utcnow(),
+        )
+        session.add(job)
+        session.commit()
+        successes.append(str(dest))
 
     return template_response(
         "downloads_manual_import.html",
@@ -275,10 +375,12 @@ async def manual_import_run(
             "preview": {
                 "path": str(path),
                 "media_type": media_type,
-                "title": final_title,
-                "authors": ", ".join(author_list),
+                "title": title,
+                "authors": authors,
+                "multi": multi_books,
+                "books": books,
             },
-            "success": f"Imported to {dest}",
+            "success": f"Imported {len(successes)} item(s)",
             "error": None,
             "browse_base": os.getenv("ABR_IMPORT_ROOT"),
         },
