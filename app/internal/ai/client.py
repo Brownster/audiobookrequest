@@ -64,13 +64,35 @@ async def fetch_ai_categories(
             logger.info("Using cached AI categories", count=len(hit[1]))
             return hit[1][:desired_count]
 
-    # Build light-weight profile
+    # Build light-weight profile from both ABS library and request history
     from app.internal.models import BookRequest
 
     top_authors: list[str] = []
     top_narrators: list[str] = []
     recent_titles: list[str] = []
     if user is not None:
+        author_counts: Counter[str] = Counter()
+        narrator_counts: Counter[str] = Counter()
+
+        # First, include books from Audiobookshelf library
+        try:
+            from app.internal.audiobookshelf.config import abs_config
+            from app.internal.audiobookshelf.client import abs_list_library_items
+
+            if abs_config.is_valid(session):
+                abs_books = await abs_list_library_items(session, client_session, limit=30)
+                for book in abs_books:
+                    for au in book.authors or []:
+                        author_counts[au] += 1
+                    for na in book.narrators or []:
+                        narrator_counts[na] += 1
+                    if len(recent_titles) < 15 and book.title:
+                        recent_titles.append(book.title)
+                logger.info("Added ABS library books to AI category profile", count=len(abs_books))
+        except Exception as e:
+            logger.debug("Could not fetch ABS library books for AI category profile", error=str(e))
+
+        # Then add books from request history
         updated_at_column = cast(Any, BookRequest.updated_at)
         reqs = session.exec(
             select(BookRequest)
@@ -78,20 +100,21 @@ async def fetch_ai_categories(
             .order_by(updated_at_column.desc())
             .limit(50)
         ).all()
-        author_counts: Counter[str] = Counter()
-        narrator_counts: Counter[str] = Counter()
         for r in reqs:
             for au in r.authors or []:
                 author_counts[au] += 1
             for na in r.narrators or []:
                 narrator_counts[na] += 1
-            if len(recent_titles) < 10 and r.title:
+            if len(recent_titles) < 20 and r.title:
                 recent_titles.append(r.title)
-        top_authors = [k for k, _ in author_counts.most_common(8)]
-        top_narrators = [k for k, _ in narrator_counts.most_common(8)]
+
+        top_authors = [k for k, _ in author_counts.most_common(10)]  # Increased from 8 to 10
+        top_narrators = [k for k, _ in narrator_counts.most_common(10)]  # Increased from 8 to 10
 
     system_instructions = (
         "You are an assistant that suggests discovery categories for audiobooks. "
+        "The user profile includes books from their library and listening history. "
+        "Suggest categories that match their tastes and help them discover similar content. "
         "Respond strictly in compact JSON matching the schema. Avoid any prose."
     )
 
@@ -386,10 +409,37 @@ async def fetch_ai_book_recommendations(
             logger.info("Using cached AI book recs", count=len(hit[1]))
             return hit[1][:desired_count]
 
-    # Build small seed list of recent user requests
+    # Build small seed list of recent user requests + ABS library books
     from app.internal.models import BookRequest
     seeds: list[dict[str, str]] = []
+    seen: set[str] = set()
+
     if user is not None:
+        # First, try to get books from Audiobookshelf library (recently added/listened)
+        try:
+            from app.internal.audiobookshelf.config import abs_config
+            from app.internal.audiobookshelf.client import abs_list_library_items
+
+            if abs_config.is_valid(session):
+                abs_books = await abs_list_library_items(session, client_session, limit=15)
+                for book in abs_books:
+                    if not book.title:
+                        continue
+                    key = (book.title or "") + "|" + (book.authors[0] if book.authors else "")
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    seeds.append({
+                        "title": book.title,
+                        "author": (book.authors[0] if book.authors else "")
+                    })
+                    if len(seeds) >= 10:
+                        break
+                logger.info("Added ABS library books as AI recommendation seeds", count=len(seeds))
+        except Exception as e:
+            logger.debug("Could not fetch ABS library books for AI seeds", error=str(e))
+
+        # Then add books from request history
         updated_at_column = cast(Any, BookRequest.updated_at)
         reqs = session.exec(
             select(BookRequest)
@@ -397,7 +447,6 @@ async def fetch_ai_book_recommendations(
             .order_by(updated_at_column.desc())
             .limit(20)
         ).all()
-        seen: set[str] = set()
         for r in reqs:
             key = (r.title or "") + "|" + (r.authors[0] if r.authors else "")
             if key in seen:
@@ -405,26 +454,32 @@ async def fetch_ai_book_recommendations(
             seen.add(key)
             if r.title:
                 seeds.append({"title": r.title, "author": (r.authors[0] if r.authors else "")})
-            if len(seeds) >= 8:
+            if len(seeds) >= 15:  # Increased from 8 to 15 for richer context
                 break
 
     system = (
         "You recommend specific audiobook titles that match a user's tastes. "
+        "The user has provided their listening history including books they own in their library. "
+        "Recommend NEW books they don't already have. "
         "Return only compact JSON; no extra text."
     )
     user_prompt = {
         "task": "title_recommendations_with_reasons",
         "count": max(4, min(desired_count, 16)),
-        "recent_requests": seeds,
+        "user_listening_history": seeds,
         "requirements": {
             "seed_title": "one of the user's recent titles you matched against",
             "seed_author": "best-effort main author of that seed",
-            "title": "recommended title",
+            "title": "recommended title (must be DIFFERENT from user's history)",
             "author": "main author",
             "reasoning": "short phrase e.g. 'similar theme and narration style'",
             "search_terms": "optional concise queries to help locate the book",
         },
-        "constraints": {"json_only": True, "language": "English"},
+        "constraints": {
+            "json_only": True,
+            "language": "English",
+            "exclude_user_books": "Do not recommend any books from the user's listening history"
+        },
         "output_schema": [
             {
                 "seed_title": "string",

@@ -78,8 +78,11 @@ def update_abs_library(
 @router.put("/check-downloaded")
 def update_abs_check_downloaded(
     session: Annotated[Session, Depends(get_session)],
-    check_downloaded: Annotated[bool, Form()] = False,
+    check_downloaded: Annotated[str, Form()] = "0",
     admin_user: DetailedUser = Security(ABRAuth(GroupEnum.admin)),
 ):
-    abs_config.set_check_downloaded(session, check_downloaded)
+    # Convert string "0" or "1" to boolean
+    # When checkbox is checked, form sends both "0" and "1", so we check if "1" is present
+    enabled = "1" in check_downloaded if isinstance(check_downloaded, str) else False
+    abs_config.set_check_downloaded(session, enabled)
     return Response(status_code=204, headers={"HX-Refresh": "true"})
