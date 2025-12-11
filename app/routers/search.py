@@ -276,14 +276,15 @@ async def add_request(
         book_asin=asin,
     )
 
-    if quality_config.get_auto_download(session) and user.is_above(GroupEnum.trusted):
-        # start querying and downloading if auto download is enabled
-        background_task.add_task(
-            background_start_query,
-            asin=asin,
-            requester=User.model_validate(user),
-            auto_download=True,
-        )
+    # Always trigger background MAM search immediately (find sources)
+    # If auto_download is enabled, it will also download; otherwise just searches
+    auto_download_enabled = quality_config.get_auto_download(session) and user.is_above(GroupEnum.trusted)
+    background_task.add_task(
+        background_start_query,
+        asin=asin,
+        requester=User.model_validate(user),
+        auto_download=auto_download_enabled,
+    )
 
     # If redirect_to_home is set, redirect to homepage instead of refreshing search results
     if redirect_to_home:
