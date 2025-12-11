@@ -64,11 +64,11 @@
     <div class="form-control pt-4">
       <label class="label cursor-pointer">
         <span class="label-text">Use ABS to mark existing books as downloaded</span>
-        <form hx-put="{{ base_url }}/settings/audiobookshelf/check-downloaded">
+        <form hx-put="{{ base_url }}/settings/audiobookshelf/check-downloaded"
+              hx-trigger="change from:input[type='checkbox']">
           <input type="hidden" name="check_downloaded" value="0" />
           <input type="checkbox" name="check_downloaded" class="toggle" value="1"
-                 {% if abs_check_downloaded %}checked{% endif %}
-                 onchange="this.form.submit()" />
+                 {% if abs_check_downloaded %}checked{% endif %} />
         </form>
       </label>
       <p class="text-xs opacity-60">When enabled, search results will be checked against Audiobookshelf and marked as downloaded if found to avoid duplicate requests.</p>
