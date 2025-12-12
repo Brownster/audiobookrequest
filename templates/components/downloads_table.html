@@ -1,8 +1,212 @@
-<div class="w-full max-w-6xl space-y-3" id="downloads-table">
+<div class="w-full max-w-6xl space-y-4" id="downloads-table">
   {% if not jobs or not jobs|length %}
     <div class="p-6 border rounded-box text-sm opacity-70">No downloads yet.</div>
   {% else %}
-    <div class="overflow-x-auto">
+    <div class="lg:hidden grid gap-3">
+      {% for job in jobs %}
+        {% set status = job.status|lower %}
+        {% set badge = "badge-ghost" %}
+        {% if status == "completed" %}{% set badge = "badge-success" %}
+        {% elif status == "failed" %}{% set badge = "badge-error" %}
+        {% elif status == "processing" %}{% set badge = "badge-warning" %}
+        {% elif status in ["downloading","seeding","pending"] %}{% set badge = "badge-info" %}
+        {% endif %}
+        {% set msg_lower = (job.message or '')|lower %}
+        {% set has_torrent = job.hash or false %}
+        {% set post_failed = 'post-processing failed' in msg_lower %}
+        {% set needs_processing = status == "seeding" and not job.destination_path %}
+        <div class="p-4 border rounded-box space-y-3">
+          <div class="flex flex-wrap items-start gap-3">
+            <div class="flex-1 min-w-0 space-y-1">
+              <div class="font-semibold" title="{{ job.title }}">{{ job.title }}</div>
+              <div class="text-xs opacity-70">mamid {{ job.torrent_id or "-" }}</div>
+            </div>
+            <div class="flex flex-col gap-1.5 items-start">
+              <span class="badge {{ badge }} gap-2 capitalize font-medium">{{ status }}</span>
+
+              {# Torrent client state badge - show if torrent exists in client #}
+              {% if job.hash and job.client_state %}
+                {% set clean_state = job.client_state.replace('qB state:', '').replace('qb state:', '').strip() %}
+                {% set state_badge = "badge-neutral badge-outline" %}
+                {% if 'force-start' in job.client_state|lower %}
+                  {% set state_badge = "badge-success" %}
+                {% elif 'inactive' in job.client_state|lower %}
+                  {% set state_badge = "badge-warning" %}
+                {% elif 'failed' in job.client_state|lower or 'error' in job.client_state|lower %}
+                  {% set state_badge = "badge-error" %}
+                {% elif 'uploading' in clean_state|lower or 'forcedup' in clean_state|lower %}
+                  {% set state_badge = "badge-success badge-outline" %}
+                {% elif 'downloading' in clean_state|lower %}
+                  {% set state_badge = "badge-info badge-outline" %}
+                {% endif %}
+                <span class="badge {{ state_badge }} badge-sm text-xs whitespace-nowrap" title="{{ job.client_state }}">{{ clean_state }}</span>
+              {% elif job.message %}
+                {% if 'qb state:' in msg_lower or 'force-start' in msg_lower or 'resuming' in msg_lower %}
+                  {% set clean_state = job.message.replace('qB state:', '').replace('qb state:', '').strip() %}
+                  {% set state_badge = "badge-neutral badge-outline" %}
+                  {% if 'force-start' in msg_lower %}
+                    {% set state_badge = "badge-success" %}
+                  {% elif 'inactive' in msg_lower %}
+                    {% set state_badge = "badge-warning" %}
+                  {% elif 'uploading' in msg_lower or 'forcedup' in msg_lower %}
+                    {% set state_badge = "badge-success badge-outline" %}
+                  {% elif 'downloading' in msg_lower %}
+                    {% set state_badge = "badge-info badge-outline" %}
+                  {% endif %}
+                  <span class="badge {{ state_badge }} badge-sm text-xs whitespace-nowrap" title="{{ job.message }}">{{ clean_state }}</span>
+                {% endif %}
+              {% endif %}
+
+              {# Post-processing status badge - show for all jobs with torrents #}
+              {% if 'post-processing failed' in msg_lower %}
+                <span class="badge badge-error badge-sm text-xs whitespace-nowrap" title="{{ job.message }}">
+                  <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                  </svg>
+                  Processing Failed
+                </span>
+              {% elif status == "processing" %}
+                <span class="badge badge-warning badge-sm text-xs whitespace-nowrap">
+                  <svg class="animate-spin w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing...
+                </span>
+              {% elif job.destination_path %}
+                <span class="badge badge-success badge-outline badge-sm text-xs whitespace-nowrap" title="Post-processed successfully">
+                  <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                  </svg>
+                  Processed
+                </span>
+              {% elif status in ["downloading", "seeding"] and job.hash %}
+                <span class="badge badge-ghost badge-sm text-xs whitespace-nowrap" title="Waiting for download to complete">
+                  <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  Not Processed
+                </span>
+              {% endif %}
+
+              {# Seed time tracking badge - show for seeding jobs with time data #}
+              {% if status == "seeding" and job.seed_time_required %}
+                {% set elapsed_hrs = (job.seed_time_elapsed / 3600)|round(0, 'floor')|int %}
+                {% set required_hrs = (job.seed_time_required / 3600)|round(0, 'floor')|int %}
+                {% set remaining_hrs = (job.seed_time_remaining / 3600)|round(0, 'ceil')|int %}
+                {% set progress_pct = ((job.seed_time_elapsed / job.seed_time_required) * 100)|round(0)|int if job.seed_time_required > 0 else 0 %}
+
+                {% set seed_badge = "badge-info badge-outline" %}
+                {% if progress_pct >= 100 %}
+                  {% set seed_badge = "badge-success" %}
+                {% elif progress_pct >= 75 %}
+                  {% set seed_badge = "badge-success badge-outline" %}
+                {% elif progress_pct >= 50 %}
+                  {% set seed_badge = "badge-warning badge-outline" %}
+                {% endif %}
+
+                <span class="badge {{ seed_badge }} badge-sm text-xs whitespace-nowrap" title="Seed time: {{ elapsed_hrs }}h elapsed, {{ remaining_hrs }}h remaining ({{ progress_pct }}% complete)">
+                  <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+                  </svg>
+                  {{ elapsed_hrs }}h / {{ required_hrs }}h
+                </span>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="text-sm space-y-1">
+            {% if 'qb state:' not in msg_lower and 'force-start' not in msg_lower and 'resuming' not in msg_lower %}
+              <div class="whitespace-normal break-words" title="{{ job.message or '' }}">{{ job.message or "—" }}</div>
+            {% else %}
+              <div class="opacity-50">—</div>
+            {% endif %}
+            {% if job.destination_path %}
+              <div class="text-xs opacity-70 whitespace-normal break-words" title="{{ job.destination_path }}">✓ {{ job.destination_path }}</div>
+            {% endif %}
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div class="text-xs opacity-70">Added</div>
+              <div class="font-medium">{% if job.created_at %}{{ job.created_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}</div>
+            </div>
+            <div>
+              <div class="text-xs opacity-70">Finished</div>
+              <div class="font-medium">{% if job.completed_at %}{{ job.completed_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}</div>
+            </div>
+            <div>
+              <div class="text-xs opacity-70">Type</div>
+              <div class="font-medium flex items-center gap-1">
+                {% set mt = (job.media_type or 'audiobook')|lower %}
+                {% if mt == 'ebook' %}
+                  <span class="inline-block w-4 h-4">{% include "icons/book.html" %}</span> Ebook
+                {% else %}
+                  <span class="inline-block w-4 h-4">{% include "icons/speaker.html" %}</span> Audio
+                {% endif %}
+              </div>
+            </div>
+            <div>
+              <div class="text-xs opacity-70">Client</div>
+              <div class="font-medium space-y-1">
+                <div>{{ job.provider or "qBittorrent" }}</div>
+                {% if job.hash %}
+                  <div class="text-xs opacity-70 whitespace-normal break-words" title="{{ job.hash }}">hash {{ job.hash }}</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          {% if status == "failed" or needs_processing or post_failed %}
+            <div class="flex flex-wrap gap-2">
+              {% if post_failed %}
+                <button class="btn btn-xs btn-error"
+                        hx-post="{{ base_url }}/downloads/{{ job.id }}/reprocess"
+                        hx-target="#downloads-table"
+                        hx-swap="outerHTML"
+                        title="Retry post-processing with ffmpeg">
+                  Retry Process
+                </button>
+              {% elif not has_torrent %}
+                <button class="btn btn-xs btn-primary"
+                        hx-post="{{ base_url }}/downloads/{{ job.id }}/reprocess"
+                        hx-target="#downloads-table"
+                        hx-swap="outerHTML"
+                        title="Download torrent again from MAM">
+                  Retry Download
+                </button>
+              {% elif needs_processing %}
+                <button class="btn btn-xs btn-primary"
+                        hx-post="{{ base_url }}/downloads/{{ job.id }}/reprocess"
+                        hx-target="#downloads-table"
+                        hx-swap="outerHTML"
+                        title="Manually trigger post-processing">
+                  Process Now
+                </button>
+              {% else %}
+                <button class="btn btn-xs btn-primary"
+                        hx-post="{{ base_url }}/downloads/{{ job.id }}/reprocess"
+                        hx-target="#downloads-table"
+                        hx-swap="outerHTML">
+                  Retry
+                </button>
+              {% endif %}
+              <button class="btn btn-xs btn-ghost"
+                      hx-post="{{ base_url }}/downloads/{{ job.id }}/delete"
+                      hx-target="#downloads-table"
+                      hx-swap="outerHTML"
+                      hx-confirm="Remove this download entry?">
+                Remove
+              </button>
+            </div>
+          {% else %}
+            <span class="opacity-50 text-xs">—</span>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="hidden lg:block overflow-x-auto">
       <table class="table w-full">
         <thead>
           <tr>
@@ -18,19 +222,23 @@
         </thead>
         <tbody>
           {% for job in jobs %}
+            {% set status = job.status|lower %}
+            {% set badge = "badge-ghost" %}
+            {% if status == "completed" %}{% set badge = "badge-success" %}
+            {% elif status == "failed" %}{% set badge = "badge-error" %}
+            {% elif status == "processing" %}{% set badge = "badge-warning" %}
+            {% elif status in ["downloading","seeding","pending"] %}{% set badge = "badge-info" %}
+            {% endif %}
+            {% set msg_lower = (job.message or '')|lower %}
+            {% set has_torrent = job.hash or false %}
+            {% set post_failed = 'post-processing failed' in msg_lower %}
+            {% set needs_processing = status == "seeding" and not job.destination_path %}
             <tr class="hover">
               <td class="max-w-xs">
                 <div class="font-semibold truncate" title="{{ job.title }}">{{ job.title }}</div>
                 <div class="text-xs opacity-70">mamid {{ job.torrent_id or "-" }}</div>
               </td>
               <td>
-                {% set status = job.status|lower %}
-                {% set badge = "badge-ghost" %}
-                {% if status == "completed" %}{% set badge = "badge-success" %}
-                {% elif status == "failed" %}{% set badge = "badge-error" %}
-                {% elif status == "processing" %}{% set badge = "badge-warning" %}
-                {% elif status in ["downloading","seeding","pending"] %}{% set badge = "badge-info" %}
-                {% endif %}
                 <div class="flex flex-col gap-1.5 items-start">
                   <span class="badge {{ badge }} gap-2 capitalize font-medium">{{ status }}</span>
 
@@ -69,7 +277,6 @@
                   {% endif %}
 
                   {# Post-processing status badge - show for all jobs with torrents #}
-                  {% set msg_lower = (job.message or '')|lower %}
                   {% if 'post-processing failed' in msg_lower %}
                     {# Failed post-processing #}
                     <span class="badge badge-error badge-sm text-xs whitespace-nowrap" title="{{ job.message }}">
@@ -131,7 +338,6 @@
                 </div>
               </td>
               <td class="max-w-sm">
-                {% set msg_lower = (job.message or '')|lower %}
                 {% if 'qb state:' not in msg_lower and 'force-start' not in msg_lower and 'resuming' not in msg_lower %}
                   <div class="text-sm truncate" title="{{ job.message or '' }}">{{ job.message or "—" }}</div>
                 {% else %}
@@ -162,13 +368,7 @@
                 {% endif %}
               </td>
               <td class="text-sm">
-                {% set st = job.status|lower %}
-                {% set msg_lower = (job.message or '')|lower %}
-                {% set has_torrent = job.hash or false %}
-                {% set post_failed = 'post-processing failed' in msg_lower %}
-                {% set needs_processing = st == "seeding" and not job.destination_path %}
-
-                {% if st == "failed" or needs_processing or post_failed %}
+                {% if status == "failed" or needs_processing or post_failed %}
                   <div class="flex gap-2 flex-wrap">
                     {# Different button text based on what failed #}
                     {% if post_failed %}
