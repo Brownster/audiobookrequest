@@ -99,10 +99,8 @@ class PostProcessor:
             return destination
 
         if self.enable_merge and self.ffmpeg_path:
-            # If all inputs are mp3, keep mp3 container to avoid invalid mp3-in-m4b
-            all_mp3 = all(p.suffix.lower() == ".mp3" for p in audio_files)
-            merged_ext = ".mp3" if all_mp3 else ".m4b"
-            merged = destination.with_suffix(merged_ext)
+            # Always output as m4b for consistency
+            merged = destination.with_suffix(".m4b")
             merged.parent.mkdir(parents=True, exist_ok=True)
             # Filter out cover/art files (commonly mp3+jpg pairs)
             audio_only = [p for p in audio_files if p.suffix.lower() in AUDIO_EXTENSIONS and p.suffix.lower() != ".jpg"]
@@ -172,13 +170,14 @@ class PostProcessor:
         if not files:
             raise PostProcessingError("No audio files provided for merging")
 
-        # If the target is an m4b and inputs are already m4b/m4a, avoid re-muxing (e.g., eac3 Atmos in mp4/m4b is unsupported)
-        if destination.suffix.lower() == ".m4b" and any(f.suffix.lower() in {".m4b", ".m4a"} for f in files):
+        # If the target is an m4b and there's a SINGLE m4b/m4a input, just copy it
+        # (e.g., eac3 Atmos in mp4/m4b is unsupported by ffmpeg)
+        # But if there are MULTIPLE m4a files, we need to merge them!
+        if destination.suffix.lower() == ".m4b" and len(files) == 1 and files[0].suffix.lower() in {".m4b", ".m4a"}:
             destination.parent.mkdir(parents=True, exist_ok=True)
             await asyncio.to_thread(shutil.copy2, files[0], destination)
             logger.info(
-                "PostProcessor: skipped ffmpeg merge for m4b inputs (copied first file)",
-                input_count=len(files),
+                "PostProcessor: skipped ffmpeg merge for single m4b/m4a input (copied file)",
                 source=str(files[0]),
                 output=str(destination),
             )
@@ -196,8 +195,11 @@ class PostProcessor:
                 safe_path = file.as_posix().replace("'", r"'\''")
                 fh.write(f"file '{safe_path}'\n")
 
-        # Choose codec/container based on output suffix
-        is_mp3_out = destination.suffix.lower() == ".mp3"
+        # Choose codec/container based on input and output formats
+        # Check if inputs are mp3 (need conversion to AAC for m4b)
+        all_mp3 = all(f.suffix.lower() == ".mp3" for f in files)
+        is_m4b_out = destination.suffix.lower() == ".m4b"
+
         cmd = [
             self.ffmpeg_path,
             "-f",
@@ -209,9 +211,12 @@ class PostProcessor:
             "-map",
             "0:a:0",
         ]
-        if is_mp3_out:
-            cmd += ["-c:a", "copy", "-vn", "-f", "mp3"]
+
+        if all_mp3 and is_m4b_out:
+            # Convert mp3 to AAC for m4b container
+            cmd += ["-c:a", "aac", "-b:a", "128k", "-vn"]
         else:
+            # Copy codec as-is (m4a/m4b/flac/etc)
             cmd += ["-c", "copy"]
         cmd.append(str(destination))
 
@@ -271,22 +276,33 @@ class PostProcessor:
         title = request.title
         authors = request.authors or []
         narrators = request.narrators or []
+        series_name = request.series_name
+        series_position = request.series_position
 
         primary_author = authors[0] if authors else ""
         display_name = f"{primary_author} - {title}" if primary_author else title
 
+        # Audiobookshelf-compatible tags for m4b files:
+        # - artist/album_artist: Author (NOT narrator)
+        # - composer: Narrator
+        # - title/album: Book title
+        # - series/series-part: Series information for Audiobookshelf
         ffmpeg_tags = {
             "title": title,
             "album": title,
-            "artist": ", ".join(narrators or authors),
+            "artist": primary_author or ", ".join(authors),
             "album_artist": primary_author or ", ".join(authors),
             "composer": ", ".join(narrators) if narrators else None,
+            "series": series_name,
+            "series-part": series_position,
         }
 
         return {
             "title": title,
             "authors": authors,
             "narrators": narrators,
+            "series_name": series_name,
+            "series_position": series_position,
             "asin": request.asin,
             "cover_url": request.cover_image,
             "publish_date": request.release_date.isoformat() if request.release_date else None,
@@ -301,6 +317,8 @@ class PostProcessor:
             "title": metadata.get("title"),
             "authors": metadata.get("authors"),
             "narrators": metadata.get("narrators"),
+            "series": metadata.get("series_name"),
+            "sequence": metadata.get("series_position"),
             "asin": metadata.get("asin"),
             "publishDate": metadata.get("publish_date"),
             "cover": metadata.get("cover_url"),
@@ -372,7 +390,7 @@ class PostProcessor:
             logger.debug("PostProcessor: cover fetch failed", error=str(exc))
             return None
         cover_path = self.tmp_dir / f"cover_{os.getpid()}.jpg"
-        cover_path.write_bytes(data)
+        await asyncio.to_thread(cover_path.write_bytes, data)
         return cover_path
 
     async def _cleanup_tmp(self) -> None:
@@ -404,11 +422,14 @@ class EbookPostProcessor:
 
     async def process(self, job_id: str, request: BookRequest, torrent_snapshot: dict) -> Path:
         download_dir = Path(torrent_snapshot.get("downloadDir", ""))
-        if not download_dir.exists() and download_dir.parent.exists():
+        # Check path existence asynchronously to avoid blocking
+        dir_exists = await asyncio.to_thread(download_dir.exists)
+        parent_exists = await asyncio.to_thread(download_dir.parent.exists)
+        if not dir_exists and parent_exists:
             download_dir = download_dir.parent
 
         files = torrent_snapshot.get("files", []) or []
-        candidate = self._find_best_file(download_dir, files)
+        candidate = await self._find_best_file(download_dir, files)
         if not candidate:
             raise PostProcessingError("No ebook file found to process.")
 
@@ -416,10 +437,11 @@ class EbookPostProcessor:
         safe_author = _sanitize_component(authors[0], "Unknown Author")
         safe_title = _sanitize_component(request.title, "Book")
         dest_dir = self.output_dir / safe_author / safe_title
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(dest_dir.mkdir, parents=True, exist_ok=True)
 
         dest_path = dest_dir / f"{safe_title}{candidate.suffix.lower()}"
-        if dest_path.exists():
+        path_exists = await asyncio.to_thread(dest_path.exists)
+        if path_exists:
             dest_path = dest_dir / f"{safe_title}_{str(job_id)[:8]}{candidate.suffix.lower()}"
 
         await asyncio.to_thread(shutil.copy2, candidate, dest_path)
@@ -428,11 +450,12 @@ class EbookPostProcessor:
         cover_path = await self._download_cover(request.cover_image)
         if cover_path:
             final_cover = dest_dir / "cover.jpg"
-            cover_path.replace(final_cover)
+            await asyncio.to_thread(cover_path.replace, final_cover)
 
         return dest_path
 
-    def _find_best_file(self, download_dir: Path, files: list[dict]) -> Optional[Path]:
+    def _find_best_file_sync(self, download_dir: Path, files: list[dict]) -> Optional[Path]:
+        """Synchronous helper for _find_best_file."""
         # Prefer torrent-reported file list first
         ordered: list[Path] = []
         for entry in files:
@@ -454,6 +477,10 @@ class EbookPostProcessor:
                     return candidate
         return None
 
+    async def _find_best_file(self, download_dir: Path, files: list[dict]) -> Optional[Path]:
+        """Find best ebook file - async to avoid blocking on rglob()."""
+        return await asyncio.to_thread(self._find_best_file_sync, download_dir, files)
+
     async def _write_metadata(self, dest_dir: Path, request: BookRequest) -> None:
         payload = {
             "title": request.title,
@@ -464,7 +491,8 @@ class EbookPostProcessor:
             "cover": request.cover_image,
         }
         meta_path = dest_dir / "metadata.json"
-        meta_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        content = json.dumps(payload, indent=2)
+        await asyncio.to_thread(meta_path.write_text, content, encoding="utf-8")
 
     async def _download_cover(self, url: Optional[str]) -> Optional[Path]:
         if not url or not self.http_session:
@@ -478,5 +506,5 @@ class EbookPostProcessor:
             logger.debug("PostProcessor: cover fetch failed", error=str(exc))
             return None
         cover_path = self.tmp_dir / f"cover_{os.getpid()}.jpg"
-        cover_path.write_bytes(data)
+        await asyncio.to_thread(cover_path.write_bytes, data)
         return cover_path

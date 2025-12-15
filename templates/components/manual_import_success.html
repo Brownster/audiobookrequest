@@ -1,0 +1,12 @@
+{# Success message after manual import with metadata #}
+<div id="manual-import-result" class="alert alert-success shadow-lg">
+  <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current flex-shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+  <div class="flex flex-col">
+    <span class="font-bold">Successfully imported!</span>
+    <span class="text-sm">{{ title }} has been processed and added to your library.</span>
+    <span class="text-xs mt-1">Destination: {{ destination }}</span>
+  </div>
+  <a href="{{ base_url }}/downloads" class="btn btn-sm">View Downloads</a>
+</div>

@@ -12,6 +12,7 @@ This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is
 - Audiobookshelf integration: marks existing items as downloaded and triggers scans after successful jobs.
 - AI recommendations: pick OpenAI (`gpt-4o-mini` etc.) or Ollama for homepage/AI recs.
 - Ebook support: toggle MAM search to Ebooks; processed files land in `author/title/book.<ext>` under `ABR_APP__BOOK_DIR`.
+- Manual import: ingest existing audiobooks/ebooks from disk, search Audible/Audnexus for metadata, confirm or batch‑match multiple books, and run post‑processing/tagging (with series support) into your final library paths.
 
 ## Quick start (Docker)
 1. Build or pull an image (example uses GHCR):

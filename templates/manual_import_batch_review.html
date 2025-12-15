@@ -1,0 +1,405 @@
+{% extends "base.html" %}
+{% block head %}
+  <title>Batch Import - Review Matches</title>
+{% endblock head %}
+{% block body %}
+  <div class="w-screen flex flex-col items-center justify-center p-6 sm:p-8 overflow-x-hidden gap-4">
+    <div class="w-full max-w-7xl flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold">Review Book Matches</h1>
+        <p class="text-sm opacity-70">Confirm the suggested matches for each book before processing.</p>
+      </div>
+      <a class="btn btn-ghost btn-sm" href="{{ base_url }}/downloads/manual">Back to Manual Import</a>
+    </div>
+
+    {% if error %}
+      <div class="alert alert-error w-full max-w-7xl">
+        <span>{{ error }}</span>
+      </div>
+    {% endif %}
+
+    <div class="card w-full max-w-7xl bg-base-200 shadow">
+      <div class="card-body">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h2 class="text-xl font-semibold">Found {{ matches|length }} book(s)</h2>
+            <p class="text-sm opacity-70">Review and confirm matches, or search for different books.</p>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" class="btn btn-sm btn-ghost" onclick="toggleAll(true)">Check All</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="toggleAll(false)">Uncheck All</button>
+          </div>
+        </div>
+
+        <form id="batch-import-form"
+              hx-post="{{ base_url }}/downloads/manual/batch-import"
+              hx-target="#batch-results"
+              hx-swap="innerHTML"
+              hx-disabled-elt="button">
+
+          <input type="hidden" name="source_path" value="{{ source_path }}" />
+          <input type="hidden" name="media_type" value="{{ media_type }}" />
+
+          <div class="overflow-x-auto">
+            <table class="table table-zebra w-full">
+              <thead>
+                <tr>
+                  <th class="w-12">
+                    <label>
+                      <input type="checkbox" class="checkbox" checked onclick="toggleAll(this.checked)" />
+                    </label>
+                  </th>
+                  <th>Folder / Detected Title</th>
+                  <th>Suggested Match</th>
+                  <th class="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for match in matches %}
+                <tr id="row-{{ loop.index0 }}">
+                  <td>
+                    <label>
+                      <input type="checkbox"
+                             class="checkbox book-checkbox"
+                             name="confirm_{{ loop.index0 }}"
+                             {% if match.suggested %}checked{% endif %} />
+                    </label>
+                  </td>
+
+                  <td>
+                    <div class="flex flex-col gap-1">
+                      <div class="font-semibold">{{ match.candidate.title }}</div>
+                      {% if match.candidate.authors %}
+                        <div class="text-sm opacity-70">{{ match.candidate.authors|join(', ') }}</div>
+                      {% endif %}
+                      <div class="text-xs opacity-50">
+                        {% if match.candidate.disc_folders %}
+                          {{ match.candidate.disc_folders|length }} disc folder(s)
+                        {% else %}
+                          {{ match.candidate.root.name }}
+                        {% endif %}
+                      </div>
+                    </div>
+                  </td>
+
+                  <td>
+                    <div id="match-display-{{ loop.index0 }}">
+                      {% if match.suggested %}
+                        <div class="flex gap-3 items-start">
+                          <div class="avatar flex-shrink-0">
+                            <div class="w-16 rounded">
+                              {% if match.suggested.cover_image %}
+                                <img src="{{ match.suggested.cover_image }}" alt="{{ match.suggested.title }}" />
+                              {% else %}
+                                <div class="w-16 h-20 bg-base-300 rounded flex items-center justify-center">
+                                  {% include "icons/photo-off.html" %}
+                                </div>
+                              {% endif %}
+                            </div>
+                          </div>
+                          <div class="flex flex-col gap-1">
+                            <div class="font-semibold">{{ match.suggested.title }}</div>
+                            {% if match.suggested.authors %}
+                              <div class="text-sm">{{ match.suggested.authors|join(', ') }}</div>
+                            {% endif %}
+                            {% if match.suggested.narrators %}
+                              <div class="text-xs opacity-70">Narrated by: {{ match.suggested.narrators|join(', ') }}</div>
+                            {% endif %}
+                            {% if match.suggested.series_name %}
+                              <div class="text-xs opacity-70">
+                                {{ match.suggested.series_name }}
+                                {% if match.suggested.series_position %}#{{ match.suggested.series_position }}{% endif %}
+                              </div>
+                            {% endif %}
+                            {% if match.suggested.downloaded %}
+                              <div class="badge badge-warning badge-sm">Already in library</div>
+                            {% endif %}
+                            <input type="hidden" name="asin_{{ loop.index0 }}" value="{{ match.suggested.asin }}" />
+                          </div>
+                        </div>
+                      {% else %}
+                        <div class="text-sm opacity-50 italic">No match found</div>
+                      {% endif %}
+                    </div>
+
+                    {# Search results container (hidden by default) #}
+                    <div id="search-results-{{ loop.index0 }}" class="hidden mt-2"></div>
+                  </td>
+
+                  <td class="text-right">
+                    <div class="flex flex-col gap-2 items-end">
+                      <button type="button"
+                              class="btn btn-sm btn-ghost"
+                              onclick="showSearch({{ loop.index0 }}, '{{ match.candidate.title }}', '{{ match.candidate.authors|join(', ') if match.candidate.authors else '' }}')">
+                        {% if match.suggested %}Change{% else %}Search{% endif %}
+                      </button>
+                      {% if match.suggested %}
+                        <button type="button"
+                                class="btn btn-xs btn-ghost text-error"
+                                onclick="clearMatch({{ loop.index0 }})">
+                          Remove
+                        </button>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="flex justify-between items-center">
+            <div class="text-sm opacity-70">
+              <span id="checked-count">{{ matches|selectattr('suggested')|list|length }}</span> of {{ matches|length }} books selected
+            </div>
+            <div class="flex gap-3">
+              <a href="{{ base_url }}/downloads/manual" class="btn btn-ghost">Cancel</a>
+              <button type="submit" class="btn btn-primary gap-2">
+                <span>Process Selected Books</span>
+                <span class="loading loading-spinner loading-sm htmx-indicator"></span>
+              </button>
+            </div>
+          </div>
+        </form>
+
+        {# Results container #}
+        <div id="batch-results" class="mt-4"></div>
+      </div>
+    </div>
+
+    {# Hidden search form template #}
+    <div id="search-template" class="hidden">
+      <div class="card bg-base-100 shadow-md mt-2">
+        <div class="card-body p-4">
+          <div class="flex gap-2 mb-3">
+            <input id="batch-search-input" name="query" class="input input-sm input-bordered flex-1" placeholder="Search Audible..." />
+            <button type="button" class="btn btn-sm btn-primary" onclick="performBatchSearch()">Search</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="hideSearch()">Cancel</button>
+          </div>
+          <div id="batch-search-results-grid" class="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentSearchIndex = null;
+
+    function toggleAll(checked) {
+      document.querySelectorAll('.book-checkbox').forEach(cb => {
+        cb.checked = checked;
+      });
+      updateCheckedCount();
+    }
+
+    function updateCheckedCount() {
+      const count = document.querySelectorAll('.book-checkbox:checked').length;
+      document.getElementById('checked-count').textContent = count;
+    }
+
+    // Update count on any checkbox change
+    document.addEventListener('change', function(e) {
+      if (e.target.classList.contains('book-checkbox')) {
+        updateCheckedCount();
+      }
+    });
+
+    function showSearch(index, defaultTitle, defaultAuthor) {
+      currentSearchIndex = index;
+      const resultsContainer = document.getElementById(`search-results-${index}`);
+      const template = document.getElementById('search-template');
+
+      // Clone and populate search form
+      const searchForm = template.cloneNode(true);
+      searchForm.classList.remove('hidden');
+      searchForm.id = '';
+
+      const queryInput = searchForm.querySelector('#batch-search-input');
+      queryInput.value = `${defaultTitle} ${defaultAuthor}`.trim();
+
+      resultsContainer.innerHTML = '';
+      resultsContainer.appendChild(searchForm);
+      resultsContainer.classList.remove('hidden');
+
+      // Auto-trigger search with default query
+      if (queryInput.value.trim()) {
+        performBatchSearch();
+      }
+    }
+
+    async function performBatchSearch() {
+      if (currentSearchIndex === null) return;
+
+      const queryInput = document.querySelector('#batch-search-input');
+      const query = queryInput.value.trim();
+      if (!query) return;
+
+      const resultsGrid = document.getElementById('batch-search-results-grid');
+      resultsGrid.innerHTML = '<div class="col-span-full flex justify-center"><span class="loading loading-spinner loading-md"></span></div>';
+
+      try {
+        const response = await fetch('{{ base_url }}/downloads/manual/search-book', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            query: query,
+            source_path: '{{ source_path }}',
+            media_type: '{{ media_type }}',
+            book_index: currentSearchIndex.toString()
+          })
+        });
+
+        if (!response.ok) throw new Error('Search failed');
+
+        const html = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+
+        // Extract book data from the returned HTML
+        const bookCards = doc.querySelectorAll('.card');
+        resultsGrid.innerHTML = '';
+
+        if (bookCards.length === 0) {
+          resultsGrid.innerHTML = '<div class="col-span-full text-center text-sm opacity-70">No results found</div>';
+          return;
+        }
+
+        bookCards.forEach(card => {
+          const asin = card.querySelector('input[name="asin"]')?.value;
+          const title = card.querySelector('.card-title')?.textContent || '';
+          const cover = card.querySelector('img')?.src || '';
+          const authors = card.querySelector('p.text-xs')?.textContent || '';
+          const seriesElem = card.querySelectorAll('p.text-xs')[1];
+          const series = seriesElem?.textContent || '';
+          const downloaded = card.querySelector('.badge-warning') !== null;
+
+          if (asin) {
+            const bookCard = createBookCard(asin, title, authors, series, cover, downloaded);
+            resultsGrid.appendChild(bookCard);
+          }
+        });
+      } catch (error) {
+        resultsGrid.innerHTML = `<div class="col-span-full alert alert-error"><span>Search failed: ${error.message}</span></div>`;
+      }
+    }
+
+    function createBookCard(asin, title, authors, series, cover, downloaded) {
+      const card = document.createElement('div');
+      card.className = 'card bg-base-100 shadow-md hover:shadow-lg transition-shadow cursor-pointer';
+      card.onclick = () => selectBookFromSearch(asin, title, authors, series, cover, downloaded);
+
+      card.innerHTML = `
+        <figure class="relative">
+          ${cover ?
+            `<img class="w-full h-32 object-cover" src="${cover}" alt="${title}" />` :
+            `<div class="w-full h-32 bg-base-300 flex items-center justify-center">
+              <svg class="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>`
+          }
+          ${downloaded ? '<div class="badge badge-warning badge-sm absolute top-1 right-1">In Library</div>' : ''}
+        </figure>
+        <div class="card-body p-2">
+          <h3 class="text-xs font-semibold line-clamp-2">${title}</h3>
+          <p class="text-[10px] opacity-70 line-clamp-1">${authors}</p>
+          ${series ? `<p class="text-[10px] opacity-60">${series}</p>` : ''}
+        </div>
+      `;
+
+      return card;
+    }
+
+    function selectBookFromSearch(asin, title, authors, series, cover, downloaded) {
+      // This calls the existing selectBook function with parsed data
+      const narrators = '';  // Not available from search results
+      const seriesName = series.split('#')[0].trim();
+      const seriesPosition = series.includes('#') ? series.split('#')[1].trim() : '';
+
+      selectBook(currentSearchIndex, asin, title, authors, narrators, seriesName, seriesPosition, cover, downloaded);
+    }
+
+    function hideSearch() {
+      if (currentSearchIndex !== null) {
+        const resultsContainer = document.getElementById(`search-results-${currentSearchIndex}`);
+        resultsContainer.classList.add('hidden');
+        resultsContainer.innerHTML = '';
+        currentSearchIndex = null;
+      }
+    }
+
+    function selectBook(index, asin, title, authors, narrators, series, seriesPosition, coverImage, downloaded) {
+      // Update hidden input
+      let asinInput = document.querySelector(`input[name="asin_${index}"]`);
+      if (!asinInput) {
+        asinInput = document.createElement('input');
+        asinInput.type = 'hidden';
+        asinInput.name = `asin_${index}`;
+        document.getElementById('batch-import-form').appendChild(asinInput);
+      }
+      asinInput.value = asin;
+
+      // Update display
+      const displayContainer = document.getElementById(`match-display-${index}`);
+      displayContainer.innerHTML = `
+        <div class="flex gap-3 items-start">
+          <div class="avatar flex-shrink-0">
+            <div class="w-16 rounded">
+              ${coverImage ?
+                `<img src="${coverImage}" alt="${title}" />` :
+                `<div class="w-16 h-20 bg-base-300 rounded flex items-center justify-center">
+                  {% include "icons/photo-off.html" %}
+                </div>`
+              }
+            </div>
+          </div>
+          <div class="flex flex-col gap-1">
+            <div class="font-semibold">${title}</div>
+            ${authors ? `<div class="text-sm">${authors}</div>` : ''}
+            ${narrators ? `<div class="text-xs opacity-70">Narrated by: ${narrators}</div>` : ''}
+            ${series ? `<div class="text-xs opacity-70">${series}${seriesPosition ? ' #' + seriesPosition : ''}</div>` : ''}
+            ${downloaded ? '<div class="badge badge-warning badge-sm">Already in library</div>' : ''}
+          </div>
+        </div>
+      `;
+
+      // Check the checkbox
+      document.querySelector(`input[name="confirm_${index}"]`).checked = true;
+      updateCheckedCount();
+
+      // Update action button
+      const row = document.getElementById(`row-${index}`);
+      const actionCell = row.querySelector('td:last-child');
+      actionCell.querySelector('button').textContent = 'Change';
+
+      // Hide search
+      hideSearch();
+    }
+
+    function clearMatch(index) {
+      // Clear hidden input
+      const asinInput = document.querySelector(`input[name="asin_${index}"]`);
+      if (asinInput) {
+        asinInput.remove();
+      }
+
+      // Update display
+      const displayContainer = document.getElementById(`match-display-${index}`);
+      displayContainer.innerHTML = '<div class="text-sm opacity-50 italic">No match found</div>';
+
+      // Uncheck checkbox
+      document.querySelector(`input[name="confirm_${index}"]`).checked = false;
+      updateCheckedCount();
+
+      // Update action button
+      const row = document.getElementById(`row-${index}`);
+      const actionCell = row.querySelector('td:last-child');
+      actionCell.querySelector('button').textContent = 'Search';
+    }
+
+    // Initialize count on page load
+    updateCheckedCount();
+  </script>
+{% endblock body %}

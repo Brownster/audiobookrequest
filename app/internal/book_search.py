@@ -87,12 +87,24 @@ async def _get_audnexus_book(
     except Exception as e:
         logger.error("Exception while fetching book from Audnexus", asin=asin, error=e)
         return None
+    # Extract series information (prefer primary series)
+    series_name = None
+    series_position = None
+    if book.get("seriesPrimary"):
+        series_name = book["seriesPrimary"].get("name")
+        series_position = book["seriesPrimary"].get("position")
+    elif book.get("seriesSecondary"):
+        series_name = book["seriesSecondary"].get("name")
+        series_position = book["seriesSecondary"].get("position")
+
     return BookRequest(
         asin=book["asin"],
         title=book["title"],
         subtitle=book.get("subtitle"),
         authors=[author["name"] for author in book["authors"]],
         narrators=[narrator["name"] for narrator in book["narrators"]],
+        series_name=series_name,
+        series_position=series_position,
         cover_image=book.get("image"),
         release_date=datetime.fromisoformat(book["releaseDate"]),
         runtime_length_min=book["runtimeLengthMin"],

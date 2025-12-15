@@ -1,0 +1,139 @@
+{# Book search results for manual import - shows suggested match + option to see all results #}
+<div id="book-search-results" class="flex flex-col gap-4 w-full">
+  {% if suggested %}
+    {# Show suggested match prominently #}
+    <div id="suggested-match" class="flex flex-col gap-2">
+      <h4 class="text-lg font-semibold">Suggested Match:</h4>
+      <div class="card bg-base-200 shadow-xl">
+        <div class="card-body flex-row gap-4">
+          {# Book cover #}
+          <div class="flex-shrink-0">
+            {% if suggested.cover_image %}
+              <img class="w-32 h-32 object-cover rounded-md shadow"
+                   src="{{ suggested.cover_image }}"
+                   alt="{{ suggested.title }}" />
+            {% else %}
+              <div class="w-32 h-32 bg-base-300 rounded-md flex items-center justify-center">
+                {% include "icons/photo-off.html" %}
+              </div>
+            {% endif %}
+          </div>
+
+          {# Book metadata #}
+          <div class="flex-1 flex flex-col gap-1">
+            <h3 class="text-xl font-bold">{{ suggested.title }}</h3>
+            {% if suggested.subtitle %}
+              <p class="text-sm text-base-content/70">{{ suggested.subtitle }}</p>
+            {% endif %}
+            <p class="text-sm"><span class="font-semibold">Authors:</span> {{ suggested.authors | join(', ') }}</p>
+            {% if suggested.narrators %}
+              <p class="text-sm"><span class="font-semibold">Narrators:</span> {{ suggested.narrators | join(', ') }}</p>
+            {% endif %}
+            {% if suggested.series_name %}
+              <p class="text-sm"><span class="font-semibold">Series:</span> {{ suggested.series_name }}
+                {% if suggested.series_position %}#{{ suggested.series_position }}{% endif %}
+              </p>
+            {% endif %}
+            {% if suggested.downloaded %}
+              <div class="badge badge-warning badge-sm">Already in library</div>
+            {% endif %}
+          </div>
+
+          {# Action buttons #}
+          <div class="flex flex-col gap-2 justify-center">
+            <form hx-post="{{ base_url }}/downloads/manual/select-book"
+                  hx-target="#metadata-confirmation"
+                  hx-swap="innerHTML">
+              <input type="hidden" name="asin" value="{{ suggested.asin }}" />
+              <input type="hidden" name="source_path" value="{{ source_path }}" />
+              <input type="hidden" name="media_type" value="{{ media_type }}" />
+              <input type="hidden" name="book_index" value="{{ book_index }}" />
+              <button type="submit" class="btn btn-primary btn-sm">Use This Book</button>
+            </form>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('all-results').style.display='block'; document.getElementById('suggested-match').style.display='none';">
+              Search Different Book
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {# All search results (hidden by default if there's a suggested match) #}
+  <div id="all-results" {% if suggested %}style="display:none"{% endif %} class="flex flex-col gap-4">
+    <div class="flex items-center gap-2">
+      {% if suggested %}
+        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('suggested-match').style.display='block'; document.getElementById('all-results').style.display='none';">
+          ← Back to Suggested
+        </button>
+      {% endif %}
+      <h4 class="text-lg font-semibold">All Search Results ({{ books | length }}):</h4>
+    </div>
+
+    {# Manual search input #}
+    <form hx-post="{{ base_url }}/downloads/manual/search-book"
+          hx-target="#book-search-results"
+          hx-swap="outerHTML"
+          class="flex gap-2">
+      <input type="hidden" name="source_path" value="{{ source_path }}" />
+      <input type="hidden" name="media_type" value="{{ media_type }}" />
+      <input type="hidden" name="book_index" value="{{ book_index }}" />
+      <input name="query"
+             class="input input-bordered flex-1"
+             placeholder="Refine search..."
+             value="{{ query }}"
+             hx-trigger="keyup changed delay:500ms"
+             hx-post="{{ base_url }}/downloads/manual/search-book"
+             hx-target="#book-search-results"
+             hx-swap="outerHTML" />
+      <button type="submit" class="btn btn-primary">Search</button>
+    </form>
+
+    {% if books %}
+      {# Grid of book cards #}
+      <div class="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {% for book in books %}
+          <div class="card bg-base-100 shadow-md hover:shadow-lg transition-shadow">
+            <figure class="relative">
+              {% if book.cover_image %}
+                <img class="w-full h-48 object-cover"
+                     src="{{ book.cover_image }}"
+                     alt="{{ book.title }}" />
+              {% else %}
+                <div class="w-full h-48 bg-base-300 flex items-center justify-center">
+                  {% include "icons/photo-off.html" %}
+                </div>
+              {% endif %}
+              {% if book.downloaded %}
+                <div class="badge badge-warning badge-sm absolute top-2 right-2">In Library</div>
+              {% endif %}
+            </figure>
+            <div class="card-body p-3">
+              <h3 class="card-title text-sm line-clamp-2">{{ book.title }}</h3>
+              <p class="text-xs text-base-content/70 line-clamp-1">{{ book.authors | join(', ') }}</p>
+              {% if book.series_name %}
+                <p class="text-xs text-base-content/60">{{ book.series_name }}
+                  {% if book.series_position %}#{{ book.series_position }}{% endif %}
+                </p>
+              {% endif %}
+              <form hx-post="{{ base_url }}/downloads/manual/select-book"
+                    hx-target="#metadata-confirmation"
+                    hx-swap="innerHTML"
+                    class="card-actions justify-end mt-2">
+                <input type="hidden" name="asin" value="{{ book.asin }}" />
+                <input type="hidden" name="source_path" value="{{ source_path }}" />
+                <input type="hidden" name="media_type" value="{{ media_type }}" />
+                <input type="hidden" name="book_index" value="{{ book_index }}" />
+                <button type="submit" class="btn btn-primary btn-xs w-full">Select</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="alert alert-info">
+        <span>No results found. Try a different search term.</span>
+      </div>
+    {% endif %}
+  </div>
+</div>

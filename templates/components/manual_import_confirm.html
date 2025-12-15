@@ -1,0 +1,123 @@
+{# Metadata confirmation form for manual import #}
+<div id="metadata-confirmation" class="card bg-base-200 shadow-xl mt-4">
+  <div class="card-body">
+    <h3 class="card-title text-2xl">Step 3: Confirm Book Details</h3>
+
+    {% if duplicate_warning %}
+      <div class="alert alert-warning">
+        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+        <span>{{ duplicate_warning }}</span>
+      </div>
+    {% endif %}
+
+    <div class="flex flex-col sm:flex-row gap-6">
+      {# Book cover #}
+      <div class="flex-shrink-0">
+        {% if book.cover_image %}
+          <img class="w-48 h-48 object-cover rounded-lg shadow-lg"
+               src="{{ book.cover_image }}"
+               alt="{{ book.title }}" />
+        {% else %}
+          <div class="w-48 h-48 bg-base-300 rounded-lg flex items-center justify-center">
+            {% include "icons/photo-off.html" %}
+          </div>
+        {% endif %}
+      </div>
+
+      {# Editable metadata form #}
+      <form hx-post="{{ base_url }}/downloads/manual/import-with-metadata"
+            hx-disabled-elt="button"
+            hx-target="#manual-import-result"
+            hx-swap="innerHTML"
+            class="flex-1 flex flex-col gap-3">
+        <input type="hidden" name="asin" value="{{ book.asin }}" />
+        <input type="hidden" name="source_path" value="{{ source_path }}" />
+        <input type="hidden" name="media_type" value="{{ media_type }}" />
+        <input type="hidden" name="book_index" value="{{ book_index }}" />
+
+        {# Title #}
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text font-semibold">Title:</span>
+          </label>
+          <input name="title"
+                 class="input input-bordered"
+                 value="{{ book.title }}"
+                 required />
+        </div>
+
+        {# Authors #}
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text font-semibold">Authors:</span>
+            <span class="label-text-alt text-xs">Comma-separated</span>
+          </label>
+          <input name="authors"
+                 class="input input-bordered"
+                 value="{{ book.authors | join(', ') }}"
+                 placeholder="J.K. Rowling" />
+        </div>
+
+        {# Narrators #}
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text font-semibold">Narrators:</span>
+            <span class="label-text-alt text-xs">Comma-separated</span>
+          </label>
+          <input name="narrators"
+                 class="input input-bordered"
+                 value="{{ book.narrators | join(', ') }}"
+                 placeholder="Stephen Fry" />
+        </div>
+
+        {# Series #}
+        <div class="flex gap-2">
+          <div class="form-control flex-1">
+            <label class="label">
+              <span class="label-text font-semibold">Series Name:</span>
+            </label>
+            <input name="series_name"
+                   class="input input-bordered"
+                   value="{{ book.series_name or '' }}"
+                   placeholder="Harry Potter" />
+          </div>
+          <div class="form-control w-24">
+            <label class="label">
+              <span class="label-text font-semibold">#:</span>
+            </label>
+            <input name="series_position"
+                   class="input input-bordered"
+                   value="{{ book.series_position or '' }}"
+                   placeholder="1" />
+          </div>
+        </div>
+
+        {# Additional info (read-only) #}
+        <div class="divider"></div>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div><span class="font-semibold">ASIN:</span> {{ book.asin }}</div>
+          {% if book.release_date %}
+            <div><span class="font-semibold">Release Date:</span> {{ book.release_date.strftime('%Y-%m-%d') }}</div>
+          {% endif %}
+          {% if book.runtime_length_min %}
+            <div><span class="font-semibold">Runtime:</span> {{ book.runtime_length_hrs }} hours</div>
+          {% endif %}
+          <div><span class="font-semibold">Media Type:</span> {{ media_type }}</div>
+        </div>
+
+        {# Submit button #}
+        <div class="card-actions justify-end mt-4">
+          <button type="button"
+                  class="btn btn-ghost"
+                  onclick="document.getElementById('book-search-results').style.display='block'; document.getElementById('metadata-confirmation').style.display='none';">
+            ← Back to Search
+          </button>
+          <button type="submit" class="btn btn-primary gap-2">
+            <span>Process with This Metadata</span>
+            <span class="loading loading-spinner htmx-indicator"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

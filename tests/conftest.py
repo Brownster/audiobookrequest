@@ -21,6 +21,13 @@ _test_engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+
+# Import all models so SQLModel.metadata knows about them
+from app.internal.models import (
+    Config, User, BookRequest, ManualBookRequest,
+    Notification, APIKey, DownloadJob
+)
+
 SQLModel.metadata.create_all(_test_engine)
 
 # Override the database session for the entire test suite
@@ -58,9 +65,20 @@ def session_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
+    from aiohttp import ClientSession as AioClientSession
+    from unittest.mock import AsyncMock
+    from app.util.connection import get_connection
+    from app.internal.services.download_manager import DownloadManager
+
     def get_session_override():
         return session
     app.dependency_overrides[get_session] = get_session_override
+
+    # Override get_connection to provide a mock ClientSession (must be async generator)
+    async def get_connection_override():
+        mock_client = AsyncMock(spec=AioClientSession)
+        yield mock_client
+    app.dependency_overrides[get_connection] = get_connection_override
 
     # Bypass auth for tests with a mock admin user by patching ABRAuth.__call__
     mock_user = DetailedUser(
@@ -77,6 +95,21 @@ def client_fixture(session: Session):
         return mock_user
 
     ABRAuth.__call__ = _auth_call  # type: ignore
+
+    # Prevent DownloadManager from doing real startup/shutdown during tests
+    dm = DownloadManager.get_instance()
+    dm.start = AsyncMock()
+    dm.stop = AsyncMock()
+
+    # Bypass app lifespan tasks entirely to avoid background startup work
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _noop_lifespan(app):
+        yield
+
+    app.router.lifespan_context = _noop_lifespan
+
     client = TestClient(app)
     yield client
     ABRAuth.__call__ = original_auth_call  # type: ignore

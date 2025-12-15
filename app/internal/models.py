@@ -80,6 +80,8 @@ class BaseBook(BaseModel):
     subtitle: Optional[str]
     authors: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     narrators: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    series_name: Optional[str] = None
+    series_position: Optional[str] = None
     cover_image: Optional[str]
     release_date: datetime
     runtime_length_min: int

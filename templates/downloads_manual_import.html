@@ -86,22 +86,102 @@
                   <div class="font-semibold mb-1">Detected books ({{ preview.books|length }})</div>
                   <ul class="list-disc list-inside text-sm opacity-80 max-h-48 overflow-y-auto">
                     {% for b in preview.books %}
-                      <li>{{ b.title }} {% if b.authors %}— {{ b.authors|join(', ') }}{% endif %} <span class="opacity-60 text-xs">({{ b.root }})</span></li>
+                      <li>{{ b.title }} {% if b.authors %}— {{ b.authors|join(', ') }}{% endif %}
+                      <span class="opacity-60 text-xs">{% if b.disc_folders %}({{ b.disc_folders|length }} disc folders){% else %}({{ b.root.name }}){% endif %}</span>
+                      </li>
                     {% endfor %}
                   </ul>
                 </div>
               </div>
             {% endif %}
+
+            {# Book Search and Metadata Lookup Section #}
+            <div class="divider">OR</div>
+
+            {# Multi-book batch processing flow #}
+            {% if preview.multi %}
+              <div class="card bg-base-100 shadow-md">
+                <div class="card-body">
+                  <h3 class="card-title">Batch Process Multiple Books</h3>
+                  <p class="text-sm opacity-70">We found {{ preview.books|length }} book(s). Click below to search for metadata and review matches.</p>
+
+                  <form method="post" action="{{ base_url }}/downloads/manual/batch-search" class="mt-4">
+                    <input type="hidden" name="source_path" value="{{ preview.path }}" />
+                    <input type="hidden" name="media_type" value="{{ preview.media_type }}" />
+                    <button type="submit" class="btn btn-primary gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      Search & Review All Books
+                    </button>
+                  </form>
+
+                  <div class="alert alert-info mt-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <span class="text-sm">This will search Audible for all {{ preview.books|length }} books and let you review matches before processing.</span>
+                  </div>
+                </div>
+              </div>
+
+            {# Single book processing flow #}
+            {% else %}
+              <div class="card bg-base-100 shadow-md">
+                <div class="card-body">
+                  <h3 class="card-title">Search for Book Metadata</h3>
+                  <p class="text-sm opacity-70">Search Audible to find accurate metadata (authors, narrators, series info)</p>
+
+                  {# Auto-trigger search on preview load for single books #}
+                  <form hx-post="{{ base_url }}/downloads/manual/search-book"
+                        hx-target="#book-search-results"
+                        hx-swap="innerHTML"
+                        hx-trigger="load"
+                        class="hidden">
+                    <input type="hidden" name="query" value="{{ preview.title }} {{ preview.authors }}" />
+                    <input type="hidden" name="source_path" value="{{ preview.path }}" />
+                    <input type="hidden" name="media_type" value="{{ preview.media_type }}" />
+                    <input type="hidden" name="book_index" value="0" />
+                  </form>
+
+                  {# Manual search form (always visible) #}
+                  <form hx-post="{{ base_url }}/downloads/manual/search-book"
+                        hx-target="#book-search-results"
+                        hx-swap="innerHTML"
+                        class="flex gap-2">
+                    <input type="hidden" name="source_path" value="{{ preview.path }}" />
+                    <input type="hidden" name="media_type" value="{{ preview.media_type }}" />
+                    <input type="hidden" name="book_index" value="0" />
+                    <input name="query"
+                           class="input input-bordered flex-1"
+                           placeholder="Search Audible..."
+                           value="{{ preview.title }} {{ preview.authors }}" />
+                    <button type="submit" class="btn btn-primary">Search</button>
+                  </form>
+
+                  {# Search results container #}
+                  <div id="book-search-results"></div>
+
+                  {# Metadata confirmation container #}
+                  <div id="metadata-confirmation"></div>
+
+                  {# Result message container #}
+                  <div id="manual-import-result"></div>
+                </div>
+              </div>
+            {% endif %}
+
+            <div class="divider">Legacy Import (No Metadata Lookup)</div>
             <div class="flex gap-3">
               <button class="btn btn-ghost" type="submit">Update Preview</button>
-              <button class="btn btn-primary"
+              <button class="btn btn-ghost"
                       type="button"
                       hx-post="{{ base_url }}/downloads/manual/import"
                       hx-include="[name='source_path'], [name='media_type']:checked, [name='title'], [name='authors'], [name='multi_books']"
                       hx-swap="none"
                       hx-indicator="#import-spinner">
                 <span id="import-spinner" class="loading loading-spinner loading-sm htmx-indicator"></span>
-                Import and Process
+                Import Without Metadata
               </button>
             </div>
           {% else %}
@@ -115,8 +195,9 @@
       <div>
         <p class="font-semibold">How it works</p>
         <ul class="list-disc list-inside text-sm opacity-80">
-          <li>We copy/merge files into your configured library paths (audiobooks: DOWNLOAD_DIR, ebooks: BOOK_DIR).</li>
-          <li>We tag with the title/author you confirm. Covers are not fetched for manual imports.</li>
+          <li><strong>With Metadata Search:</strong> We search Audible to find your book, fetch complete metadata (authors, narrators, series), apply it to tags, download cover art, and process just like a normal download.</li>
+          <li><strong>Legacy Import:</strong> We use path-based parsing for title/author only (no narrators or series). Covers are not fetched.</li>
+          <li>Files are copied/merged into your configured library paths (audiobooks: DOWNLOAD_DIR, ebooks: BOOK_DIR).</li>
           <li>Imported items appear in Downloads history as provider <code>manual</code>.</li>
         </ul>
       </div>

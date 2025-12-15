@@ -1,0 +1,129 @@
+{# Batch import results summary #}
+<div id="batch-results" class="space-y-4">
+  {% if results %}
+    {# Summary stats #}
+    <div class="stats shadow w-full">
+      <div class="stat">
+        <div class="stat-title">Total Books</div>
+        <div class="stat-value text-primary">{{ results|length }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Successful</div>
+        <div class="stat-value text-success">{{ results|selectattr('success')|list|length }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Failed</div>
+        <div class="stat-value text-error">{{ results|rejectattr('success')|list|length }}</div>
+      </div>
+    </div>
+
+    {# Success alert if any succeeded #}
+    {% if results|selectattr('success')|list|length > 0 %}
+      <div class="alert alert-success">
+        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current flex-shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>Successfully processed {{ results|selectattr('success')|list|length }} book(s)!</span>
+      </div>
+    {% endif %}
+
+    {# Error alert if any failed #}
+    {% if results|rejectattr('success')|list|length > 0 %}
+      <div class="alert alert-error">
+        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current flex-shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>{{ results|rejectattr('success')|list|length }} book(s) failed to process. See details below.</span>
+      </div>
+    {% endif %}
+
+    {# Detailed results #}
+    <div class="card bg-base-200 shadow">
+      <div class="card-body">
+        <h3 class="card-title">Processing Details</h3>
+        <div class="overflow-x-auto">
+          <table class="table table-zebra w-full">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Book</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for result in results %}
+              <tr>
+                <td class="w-20">
+                  {% if result.success %}
+                    <div class="badge badge-success gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-4 h-4 stroke-current">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                      </svg>
+                      Success
+                    </div>
+                  {% else %}
+                    <div class="badge badge-error gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-4 h-4 stroke-current">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                      </svg>
+                      Failed
+                    </div>
+                  {% endif %}
+                </td>
+
+                <td>
+                  <div class="flex flex-col gap-1">
+                    <div class="font-semibold">{{ result.title }}</div>
+                    {% if result.authors %}
+                      <div class="text-sm opacity-70">{{ result.authors }}</div>
+                    {% endif %}
+                    {% if result.asin %}
+                      <div class="text-xs opacity-50">ASIN: {{ result.asin }}</div>
+                    {% endif %}
+                  </div>
+                </td>
+
+                <td>
+                  {% if result.success %}
+                    <div class="flex flex-col gap-1">
+                      {% if result.destination %}
+                        <div class="text-sm">
+                          <span class="font-semibold">Destination:</span>
+                          <code class="text-xs bg-base-300 px-1 py-0.5 rounded">{{ result.destination }}</code>
+                        </div>
+                      {% endif %}
+                      {% if result.job_id %}
+                        <div class="text-xs opacity-70">Job ID: {{ result.job_id }}</div>
+                      {% endif %}
+                    </div>
+                  {% else %}
+                    <div class="text-sm text-error">
+                      {{ result.error }}
+                    </div>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card-actions justify-end mt-4">
+          <a href="{{ base_url }}/downloads" class="btn btn-primary">View Downloads</a>
+          <a href="{{ base_url }}/downloads/manual" class="btn btn-ghost">Import More Books</a>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    {# No results case #}
+    <div class="alert alert-warning">
+      <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current flex-shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+      <span>No books were selected for processing.</span>
+    </div>
+    <div class="flex justify-end">
+      <a href="{{ base_url }}/downloads/manual" class="btn btn-ghost">Back to Manual Import</a>
+    </div>
+  {% endif %}
+</div>
