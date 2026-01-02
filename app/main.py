@@ -35,6 +35,7 @@ with open_session() as session:
 
 from contextlib import asynccontextmanager
 from app.internal.services.download_manager import DownloadManager
+from app.util.connection import HTTPSessionManager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     await DownloadManager.get_instance().stop()
+    await HTTPSessionManager.close()  # Clean up shared HTTP session
 
 
 app = FastAPI(

@@ -24,6 +24,59 @@ from app.util.connection import get_connection
 router = APIRouter()
 
 
+def _validate_import_path(user_path: str) -> Path:
+    """
+    Validate that the import path is within allowed directories.
+    Prevents path traversal attacks by ensuring paths are within ABR_IMPORT_ROOT
+    or configured local path prefix.
+    """
+    from app.internal.indexers.configuration import indexer_configuration_cache
+    from app.util.db import open_session
+
+    # Get allowed base directories
+    allowed_roots: list[Path] = []
+
+    # Check ABR_IMPORT_ROOT environment variable
+    import_root = os.getenv("ABR_IMPORT_ROOT")
+    if import_root:
+        allowed_roots.append(Path(import_root).resolve())
+
+    # Check qBittorrent local path prefix from settings
+    try:
+        with open_session() as session:
+            local_prefix = indexer_configuration_cache.get(session, "MyAnonamouse_qbittorrent_local_path_prefix")
+            if local_prefix:
+                allowed_roots.append(Path(local_prefix).resolve())
+            # Also check global qB settings
+            global_local = indexer_configuration_cache.get(session, "qbittorrent_local_path_prefix")
+            if global_local:
+                allowed_roots.append(Path(global_local).resolve())
+    except Exception:
+        pass  # Ignore config errors, just use env var
+
+    if not allowed_roots:
+        raise HTTPException(
+            status_code=400,
+            detail="No import root configured. Set ABR_IMPORT_ROOT environment variable or configure qBittorrent Local Path Prefix."
+        )
+
+    # Resolve the target path
+    target = Path(user_path).expanduser().resolve()
+
+    # Check if target is within any allowed root
+    for root in allowed_roots:
+        try:
+            target.relative_to(root)
+            return target  # Path is valid
+        except ValueError:
+            continue
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Path must be within configured import directories: {', '.join(str(r) for r in allowed_roots)}"
+    )
+
+
 @dataclass
 class BookCandidate:
     root: Path
@@ -292,7 +345,17 @@ async def manual_import_preview(
     from app.internal.env_settings import Settings
     from app.util.log import logger
 
-    path = Path(source_path).expanduser()
+    # Validate path is within allowed directories (prevents path traversal)
+    try:
+        path = _validate_import_path(source_path)
+    except HTTPException as e:
+        return template_response(
+            "downloads_manual_import.html",
+            request,
+            user,
+            {"preview": None, "error": e.detail, "browse_base": os.getenv("ABR_IMPORT_ROOT")},
+        )
+
     error = None
     preview = None
     books: list[BookCandidate] = []
@@ -339,7 +402,17 @@ async def manual_import_run(
 
     logger.info("Manual import started", source_path=source_path, media_type=media_type, multi=multi_books)
 
-    path = Path(source_path).expanduser()
+    # Validate path is within allowed directories (prevents path traversal)
+    try:
+        path = _validate_import_path(source_path)
+    except HTTPException as e:
+        return template_response(
+            "downloads_manual_import.html",
+            request,
+            user,
+            {"preview": None, "error": e.detail, "browse_base": os.getenv("ABR_IMPORT_ROOT")},
+        )
+
     if not await asyncio.to_thread(path.exists):
         return template_response(
             "downloads_manual_import.html",
@@ -671,7 +744,8 @@ async def manual_import_with_metadata(
         book.series_position = series_position.strip()
 
     # Process through PostProcessor (similar to manual_import_run)
-    path = Path(source_path).expanduser()
+    # Validate path is within allowed directories (prevents path traversal)
+    path = _validate_import_path(source_path)
     if not await asyncio.to_thread(path.exists):
         raise HTTPException(status_code=404, detail=f"Source path does not exist: {path}")
 
@@ -770,7 +844,8 @@ async def manual_import_batch_search(
     from app.internal.env_settings import Settings
     from app.util.log import logger
 
-    path = Path(source_path).expanduser()
+    # Validate path is within allowed directories (prevents path traversal)
+    path = _validate_import_path(source_path)
     if not await asyncio.to_thread(path.exists):
         raise HTTPException(status_code=404, detail=f"Source path does not exist: {path}")
 

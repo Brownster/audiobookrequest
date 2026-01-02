@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from urllib.parse import urlencode
 
+import aiohttp
 import pydantic
 from aiohttp import ClientSession
 from sqlalchemy import CursorResult, delete
@@ -12,6 +13,9 @@ from sqlmodel import Session, col, select
 from app.internal.env_settings import Settings
 from app.internal.models import BookRequest
 from app.util.log import logger
+
+# Default timeout for external API calls
+EXTERNAL_API_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10)
 
 REFETCH_TTL = 60 * 60 * 24 * 7  # 1 week
 
@@ -74,6 +78,7 @@ async def _get_audnexus_book(
         async with session.get(
             f"https://api.audnex.us/books/{asin}?region={region}",
             headers={"Client-Agent": "audiobookrequest"},
+            timeout=EXTERNAL_API_TIMEOUT,
         ) as response:
             if not response.ok:
                 logger.warning(
@@ -106,9 +111,20 @@ async def _get_audnexus_book(
         series_name=series_name,
         series_position=series_position,
         cover_image=book.get("image"),
-        release_date=datetime.fromisoformat(book["releaseDate"]),
-        runtime_length_min=book["runtimeLengthMin"],
+        release_date=_parse_date_safe(book.get("releaseDate")),
+        runtime_length_min=book.get("runtimeLengthMin") or 0,
     )
+
+
+def _parse_date_safe(date_str: Any) -> datetime:
+    """Safely parse an ISO date string, returning current time on failure."""
+    if not date_str:
+        return datetime.now()
+    try:
+        return datetime.fromisoformat(str(date_str))
+    except (ValueError, TypeError) as e:
+        logger.warning("Failed to parse date", date_str=date_str, error=str(e))
+        return datetime.now()
 
 
 async def _get_audimeta_book(
@@ -124,6 +140,7 @@ async def _get_audimeta_book(
         async with session.get(
             f"https://audimeta.de/book/{asin}?region={region}",
             headers={"Client-Agent": "audiobookrequest"},
+            timeout=EXTERNAL_API_TIMEOUT,
         ) as response:
             if not response.ok:
                 logger.warning(
@@ -144,8 +161,8 @@ async def _get_audimeta_book(
         authors=[author["name"] for author in book["authors"]],
         narrators=[narrator["name"] for narrator in book["narrators"]],
         cover_image=book.get("imageUrl"),
-        release_date=datetime.fromisoformat(book["releaseDate"]),
-        runtime_length_min=book["lengthMinutes"] or 0,
+        release_date=_parse_date_safe(book.get("releaseDate")),
+        runtime_length_min=book.get("lengthMinutes") or 0,
     )
 
 
@@ -207,7 +224,7 @@ async def get_search_suggestions(
     )
     url = base_url + urlencode(params)
 
-    async with client_session.get(url) as response:
+    async with client_session.get(url, timeout=EXTERNAL_API_TIMEOUT) as response:
         response.raise_for_status()
         results = await response.json()
 
@@ -436,7 +453,7 @@ async def list_audible_books(
     )
     url = base_url + urlencode(params)
 
-    async with client_session.get(url) as response:
+    async with client_session.get(url, timeout=EXTERNAL_API_TIMEOUT) as response:
         response.raise_for_status()
         books_json = await response.json()
 
@@ -507,7 +524,9 @@ def get_existing_books(session: Session, asins: set[str]) -> dict[str, BookReque
 
 
 def store_new_books(session: Session, books: list[BookRequest]):
-    assert all(b.user_username is None for b in books)
+    # Validate that books are cache entries, not user-associated
+    if any(b.user_username is not None for b in books):
+        raise ValueError("Cannot store user-associated books in cache - only cache entries allowed")
     asins = {b.asin: b for b in books}
 
     existing = list(

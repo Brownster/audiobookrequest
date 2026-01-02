@@ -503,7 +503,7 @@ async def auto_download_mam(
 
     try:
         req_uuid = uuid.UUID(request_id)
-    except Exception:
+    except (ValueError, AttributeError, TypeError):
         return _render(toast_error="Invalid request id")
 
     book_request = session.get(BookRequest, req_uuid)

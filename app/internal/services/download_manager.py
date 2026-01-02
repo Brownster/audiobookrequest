@@ -43,6 +43,7 @@ def _ensure_directory(path_str: str) -> Path:
 
 class DownloadManager:
     _instance: Optional[DownloadManager] = None
+    _instance_lock: asyncio.Lock = asyncio.Lock()
 
     def __init__(self):
         self.queue: asyncio.Queue[str] = asyncio.Queue() # Queue of Job IDs
@@ -50,6 +51,7 @@ class DownloadManager:
         self.monitor_task: Optional[asyncio.Task] = None
         self._stopping = False
         self._postprocess_lock = asyncio.Lock()
+        self._job_lock = asyncio.Lock()  # Lock for job state transitions
         self._postprocess_sweep_running = False
         self.http_session: Optional[ClientSession] = None
         self._last_mam_retry: Optional[datetime] = None
@@ -72,8 +74,19 @@ class DownloadManager:
 
     @classmethod
     def get_instance(cls) -> DownloadManager:
+        """Get or create the singleton instance (sync version for compatibility)."""
         if cls._instance is None:
             cls._instance = DownloadManager()
+        return cls._instance
+
+    @classmethod
+    async def get_instance_async(cls) -> DownloadManager:
+        """Get or create the singleton instance (async version, thread-safe)."""
+        if cls._instance is None:
+            async with cls._instance_lock:
+                # Double-check pattern
+                if cls._instance is None:
+                    cls._instance = DownloadManager()
         return cls._instance
 
     async def start(self):
@@ -599,7 +612,10 @@ class DownloadManager:
                 # Transmission reports secondsSeeding; qB uses seeding_time
                 elapsed = t_info.get("seeding_time") or t_info.get("secondsSeeding") or 0
                 if isinstance(elapsed, (int, float)):
-                    job.seed_seconds = max(job.seed_seconds, int(elapsed))
+                    # Clamp to reasonable range (0 to 1 year in seconds) to prevent overflow
+                    MAX_SEED_SECONDS = 365 * 24 * 3600  # 1 year
+                    elapsed = max(0, min(int(elapsed), MAX_SEED_SECONDS))
+                    job.seed_seconds = max(job.seed_seconds, elapsed)
 
                 # Determine completion
                 state = t_info.get("state") or t_info.get("status") or ""
@@ -689,49 +705,56 @@ class DownloadManager:
                 meets_ratio = ratio_limit is None or (current_ratio >= ratio_limit)
 
                 # Check if we should move to completed (post-processing done AND seed time met)
-                if (
-                    job.status == DownloadJobStatus.seeding
-                    and job.destination_path  # Post-processing completed
-                    and meets_seed_time
-                    and meets_ratio
-                ):
-                    # Seed time requirement met - remove torrent and mark as completed
-                    try:
-                        await self.torrent_client.remove_torrent(job.transmission_hash)
-                        logger.info(
-                            "DownloadManager: removed torrent after seed time met",
-                            job_id=str(job.id),
-                            hash=job.transmission_hash,
-                            seed_seconds=job.seed_seconds,
-                            required_seed=required_seed,
-                        )
-                        job.status = DownloadJobStatus.completed
-                        job.message = f"Seeded for {job.seed_seconds // 3600}h - completed"
-                        if not job.completed_at:
-                            job.completed_at = datetime.utcnow()
-                        session.add(job)
-                    except Exception as exc:
-                        logger.warning(
-                            "DownloadManager: failed to remove torrent after seed completion",
-                            error=str(exc),
-                            hash=job.transmission_hash,
-                        )
-                        # Don't update status if removal failed - will retry next cycle
-                elif is_downloaded and meets_seed_time and meets_ratio and job.status != DownloadJobStatus.processing:
-                    # Start post-processing (but keep seeding)
-                    job.status = DownloadJobStatus.processing
-                    job.message = "Download complete, starting processing"
-                    session.add(job)
-                    session.commit()
+                # Use job lock to prevent race conditions with _finalize_job
+                async with self._job_lock:
+                    # Re-fetch job state within lock to ensure consistency
+                    job = session.get(DownloadJob, job.id)
+                    if not job:
+                        continue
 
-                    # Trigger finalization in background
-                    asyncio.create_task(self._finalize_job(str(job.id), t_info))
+                    if (
+                        job.status == DownloadJobStatus.seeding
+                        and job.destination_path  # Post-processing completed
+                        and meets_seed_time
+                        and meets_ratio
+                    ):
+                        # Seed time requirement met - remove torrent and mark as completed
+                        try:
+                            await self.torrent_client.remove_torrent(job.transmission_hash)
+                            logger.info(
+                                "DownloadManager: removed torrent after seed time met",
+                                job_id=str(job.id),
+                                hash=job.transmission_hash,
+                                seed_seconds=job.seed_seconds,
+                                required_seed=required_seed,
+                            )
+                            job.status = DownloadJobStatus.completed
+                            job.message = f"Seeded for {job.seed_seconds // 3600}h - completed"
+                            if not job.completed_at:
+                                job.completed_at = datetime.utcnow()
+                            session.add(job)
+                        except Exception as exc:
+                            logger.warning(
+                                "DownloadManager: failed to remove torrent after seed completion",
+                                error=str(exc),
+                                hash=job.transmission_hash,
+                            )
+                            # Don't update status if removal failed - will retry next cycle
+                    elif is_downloaded and meets_seed_time and meets_ratio and job.status != DownloadJobStatus.processing:
+                        # Start post-processing (but keep seeding)
+                        job.status = DownloadJobStatus.processing
+                        job.message = "Download complete, starting processing"
+                        session.add(job)
+                        session.commit()
+
+                        # Trigger finalization in background
+                        asyncio.create_task(self._finalize_job(str(job.id), t_info))
 
             # Commit all state/message updates for monitored jobs
             session.commit()
 
     async def _finalize_job(self, job_id: str, torrent_snapshot: dict):
-        async with self._postprocess_lock:
+        async with self._postprocess_lock, self._job_lock:
             job_uuid = self._coerce_uuid(job_id)
             if job_uuid is None:
                 return
@@ -762,8 +785,11 @@ class DownloadManager:
                 )
                 if not download_dir:
                     content_path = snapshot.get("content_path")
-                    if content_path:
-                        download_dir = str(Path(content_path).parent)
+                    if content_path and isinstance(content_path, str) and content_path.strip():
+                        # Validate content_path before using it
+                        content_path = content_path.strip()
+                        if content_path and content_path != "/" and len(content_path) > 1:
+                            download_dir = str(Path(content_path).parent)
 
                 remote_prefix = (config.qbittorrent_remote_path_prefix or "").rstrip("/")
                 local_prefix = (config.qbittorrent_local_path_prefix or "").rstrip("/")

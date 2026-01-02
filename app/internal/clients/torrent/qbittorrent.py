@@ -241,7 +241,10 @@ class QbitClient(AbstractTorrentClient):
                 self._basic_auth = None
         self._capabilities = capabilities
         self._authenticated = False
-        self._cookie_key = self._base_url
+        # Include credentials hash in cookie key to prevent leakage between instances
+        import hashlib
+        cred_hash = hashlib.sha256(f"{username}:{password}".encode()).hexdigest()[:16]
+        self._cookie_key = f"{self._base_url}:{cred_hash}"
         self._load_cached_cookies()
 
     def _build_url(self, path: str) -> str:

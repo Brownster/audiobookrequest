@@ -245,7 +245,6 @@ class ABRAuth(SecurityBase):
                 exc_info=e,
                 user=standard_user.model_dump(),
             )
-            exit(0)
             raise RequiresLoginException(
                 "Failed to validate user model. Please log in again."
             )

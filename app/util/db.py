@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine
 from sqlmodel import Session, text
@@ -7,8 +8,15 @@ from app.internal.env_settings import Settings
 
 db = Settings().db
 if db.use_postgres:
+    # URL-encode credentials to prevent injection via special characters
+    pg_user = quote_plus(db.postgres_user)
+    pg_password = quote_plus(db.postgres_password)
+    pg_host = db.postgres_host
+    pg_port = db.postgres_port
+    pg_db = quote_plus(db.postgres_db)
+    pg_ssl = db.postgres_ssl_mode
     engine = create_engine(
-        f"postgresql://{db.postgres_user}:{db.postgres_password}@{db.postgres_host}:{db.postgres_port}/{db.postgres_db}?sslmode={db.postgres_ssl_mode}"
+        f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}?sslmode={pg_ssl}"
     )
 else:
     sqlite_path = Settings().get_sqlite_path()

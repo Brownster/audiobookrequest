@@ -79,10 +79,11 @@ async def test_search_mam_real_error(mam_client):
 
 @pytest.mark.asyncio
 async def test_download_torrent_success(mam_client):
-    torrent_content = b"mock_torrent_content"
+    # Use valid bencode-formatted torrent data (starts with 'd' for dict)
+    torrent_content = b"d8:announce35:udp://tracker.openbittorrent.com:8013:creation datei1327049827e4:infod6:lengthi123456789e4:name14:Test Audiobook12:piece lengthi262144e6:pieces20:01234567890123456789ee"
     with aioresponses() as m:
         m.get(re.compile(r"https://www\.myanonamouse\.net/torrents\.php.*"), status=200, body=torrent_content)
-        
+
         content = await mam_client.download_torrent("123")
         assert content == torrent_content
 

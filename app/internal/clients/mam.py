@@ -496,7 +496,8 @@ class MyAnonamouseClient:
                             f"Failed to download torrent {torrent_id}: {response.status} {text}"
                         )
                         continue
-                    return await response.read()
+                    data = await response.read()
+                    return self._validate_torrent_data(data, torrent_id)
             except Exception as exc:
                 last_error = exc
                 continue
@@ -504,6 +505,21 @@ class MyAnonamouseClient:
         if last_error:
             raise last_error
         raise RuntimeError("Failed to download torrent: no valid endpoint")
+
+    def _validate_torrent_data(self, data: bytes, torrent_id: str | int) -> bytes:
+        """Validate that downloaded data is a valid torrent file."""
+        if len(data) < 50:
+            raise RuntimeError(f"Downloaded torrent data too small ({len(data)} bytes)")
+
+        # Torrent files in bencode format start with 'd' (dict marker)
+        if not data.startswith(b'd'):
+            # Might be HTML error page
+            preview = data[:500].decode('utf-8', errors='replace')
+            if '<html' in preview.lower() or 'error' in preview.lower():
+                raise RuntimeError(f"Received HTML instead of torrent file: {preview[:200]}")
+            raise RuntimeError(f"Invalid torrent data format for {torrent_id}")
+
+        return data
 
     @staticmethod
     def _is_free(flags: list[str], raw: dict[str, Any]) -> bool:

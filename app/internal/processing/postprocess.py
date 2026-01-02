@@ -191,6 +191,10 @@ class PostProcessor:
         list_file_path = self.tmp_dir / f"ffmpeg_concat_{os.getpid()}_{destination.stem}.txt"
         with list_file_path.open("w", encoding="utf-8") as fh:
             for file in files:
+                # Validate filename doesn't contain dangerous characters
+                file_str = str(file)
+                if '\n' in file_str or '\r' in file_str:
+                    raise PostProcessingError(f"Invalid filename contains newlines: {file.name}")
                 # ffmpeg concat requires escaping single quotes
                 safe_path = file.as_posix().replace("'", r"'\''")
                 fh.write(f"file '{safe_path}'\n")
@@ -232,8 +236,19 @@ class PostProcessor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
-        list_file_path.unlink(missing_ok=True)
+        try:
+            # Timeout of 1 hour for large files
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=3600
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            list_file_path.unlink(missing_ok=True)
+            raise PostProcessingError("ffmpeg merge timed out after 1 hour")
+        finally:
+            list_file_path.unlink(missing_ok=True)
 
         if process.returncode != 0:
             raise PostProcessingError(
