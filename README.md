@@ -3,6 +3,20 @@ AudiobookRequest (fork) – an end‑to‑end pipeline for Audible search, MyAno
 
 This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is the main path, and AI recommendations can use OpenAI or Ollama.
 
+## Recent Security Improvements ✅
+
+**Version 2.0** includes comprehensive security hardening with 18 critical, high, and medium priority fixes:
+
+- **Path Traversal Protection**: Manual import paths are validated against `ABR_IMPORT_ROOT` to prevent unauthorized file access
+- **SQL Injection Prevention**: PostgreSQL credentials properly URL-encoded
+- **Resource Management**: HTTP session singleton prevents file descriptor leaks
+- **Race Condition Fixes**: Thread-safe singleton pattern and job state locks prevent concurrent modification issues
+- **API Timeout Protection**: All external API calls (Audible, Audnexus, MAM) have 30-second timeouts
+- **Input Validation**: Torrent file validation, filename sanitization, and safe datetime parsing
+- **Comprehensive Test Suite**: 60+ tests including 23 security-focused tests (see `TEST_RESULTS.md`)
+
+For full details, see `tasks.md` in the repository.
+
 ## What it does
 - Audible search with region selection; “Check on MAM” buttons from search, homepage carousels, and wishlist.
 - Wishlist with pipeline status (pending → downloading → post‑processing → completed) and hourly auto‑rechecks for MAM‑unavailable items.
@@ -23,6 +37,7 @@ This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is
      -e ABR_APP__BASE_URL= \
      -e ABR_APP__DOWNLOAD_DIR=/audiobooks \
      -e ABR_APP__CONFIG_DIR=/config \
+     -e ABR_IMPORT_ROOT=/downloads \
      -v $(pwd)/config:/config \
      -v $(pwd)/config/database:/config/database \
      -v /path/to/torrents:/downloads \
@@ -32,7 +47,7 @@ This README reflects the current fork: Prowlarr is removed, MAM + qBittorrent is
    ```
    - `/config` persists the DB/settings.
    - `/config/database` keeps SQLite under /config/database (optional but tidy).
-   - `/downloads` should match the qB remote download root.
+   - `/downloads` should match the qB remote download root (also used for manual import with `ABR_IMPORT_ROOT`).
    - `/processing` (optional) for tmp/intermediate processing if you want to move it off the root FS.
    - `/audiobooks` is where finished m4b files are written (point ABS to this).
 
@@ -69,13 +84,26 @@ Settings ▸ AI:
 - Use “Test Connection”, then “Generate now” on AI recommendations.
 
 ## Useful environment variables
+
+### Core Configuration
 - `ABR_APP__PORT` (default 8000)
 - `ABR_APP__BASE_URL` (set if serving under a subpath, else leave empty)
 - `ABR_APP__DOWNLOAD_DIR` (final audiobook output; bind-mount it)
 - `ABR_APP__BOOK_DIR` (final ebook output; bind-mount it)
 - `ABR_APP__DEFAULT_REGION` (audible region, e.g., `uk`)
-- `ABR_DB__USE_POSTGRES=true` plus `ABR_DB__POSTGRES_*` if using Postgres; otherwise SQLite in `/config`.
-- `ABR_APP__INIT_ROOT_USERNAME` / `ABR_APP__INIT_ROOT_PASSWORD` to seed the first admin on fresh installs.
+- `ABR_APP__INIT_ROOT_USERNAME` / `ABR_APP__INIT_ROOT_PASSWORD` to seed the first admin on fresh installs
+
+### Security Configuration
+- `ABR_IMPORT_ROOT` (required for manual import) – restricts file browsing to this directory to prevent path traversal attacks. Set to your import source directory (e.g., `/mnt/imports` or `/downloads`)
+
+### Database Configuration
+- `ABR_DB__USE_POSTGRES=true` to use PostgreSQL instead of SQLite
+- `ABR_DB__POSTGRES_HOST` (default: localhost)
+- `ABR_DB__POSTGRES_PORT` (default: 5432)
+- `ABR_DB__POSTGRES_USER` (credentials are automatically URL-encoded for security)
+- `ABR_DB__POSTGRES_PASSWORD` (special characters like `@`, `:`, `/` are safely encoded)
+- `ABR_DB__POSTGRES_DB` (default: audiobookrequest)
+- `ABR_DB__POSTGRES_SSL_MODE` (default: prefer)
 
 ## Development (local)
 ```bash
@@ -85,11 +113,34 @@ UV_CACHE_DIR=.uv_cache uv run fastapi dev --host 127.0.0.1 --port 8000
 ```
 Set envs in `.env.local` as needed.
 
+### Testing
+Run the comprehensive test suite including security tests:
+```bash
+# Run all tests
+uv run pytest tests/ -v
+
+# Run security tests only
+uv run pytest tests/test_security_fixes.py -v
+
+# Run with coverage
+uv run pytest tests/ --cov=app --cov-report=html
+```
+
+All 60+ tests should pass. See `TEST_RESULTS.md` for detailed test documentation.
+
 ## Troubleshooting
-- No CSS / “unstyled” UI in Docker: ensure `ABR_APP__BASE_URL` is empty when serving at `/`, and map host port to container 8000.
-- Post‑processing “path does not exist”: fix qB Remote/Local path mapping and confirm files land under your `/downloads` bind.
-- OpenAI 400/empty recs: use exact model IDs (`gpt-4o-mini`), valid API key, and default endpoint `https://api.openai.com`.
-- Migrations missing columns: `alembic upgrade heads` inside the container.
+
+### General Issues
+- **No CSS / "unstyled" UI in Docker**: ensure `ABR_APP__BASE_URL` is empty when serving at `/`, and map host port to container 8000.
+- **Post‑processing "path does not exist"**: fix qB Remote/Local path mapping and confirm files land under your `/downloads` bind.
+- **OpenAI 400/empty recs**: use exact model IDs (`gpt-4o-mini`), valid API key, and default endpoint `https://api.openai.com`.
+- **Migrations missing columns**: `alembic upgrade heads` inside the container.
+
+### Security-Related Issues
+- **Manual import "Path must be within configured import directories"**: Set `ABR_IMPORT_ROOT` environment variable to allow file browsing (e.g., `-e ABR_IMPORT_ROOT=/downloads`).
+- **PostgreSQL connection errors with special characters in password**: Credentials are now automatically URL-encoded. If you're still having issues, check `ABR_DB__POSTGRES_*` settings.
+- **Timeout errors on external APIs**: External APIs (Audible, Audnexus, MAM) have 30-second timeouts. If you're experiencing frequent timeouts, check your network connectivity.
+- **Session/authentication issues**: Clear browser cookies if experiencing unexpected login problems after upgrade.
 
 Running the application is best done in multiple terminals:
 
@@ -137,6 +188,29 @@ Key points:
 - Database: Postgres service `psql` preconfigured via env vars (user `abr`/`password`, db `audiobookrequest`).
 - Migrations run automatically on start; no extra steps needed.
 - Configure MyAnonamouse in-app under `Settings > MAM` (session ID, client, seeding targets).
+
+## Security Best Practices
+
+AudioBookRequest v2.0 includes comprehensive security improvements. Follow these best practices:
+
+### Production Deployment
+1. **Set `ABR_IMPORT_ROOT`**: Always configure this when using manual import to prevent path traversal
+2. **Use Strong Credentials**: PostgreSQL passwords with special characters are automatically URL-encoded
+3. **HTTPS/Reverse Proxy**: Deploy behind nginx/Traefik with HTTPS in production
+4. **Regular Updates**: Keep dependencies updated with `uv sync` and rebuild containers
+5. **Database Backups**: Regular backups of `/config/database` (SQLite) or PostgreSQL database
+
+### Network Security
+- **Firewall Rules**: Restrict access to port 8000/9001 to trusted networks only
+- **API Keys**: Rotate OpenAI/Ollama API keys regularly if exposed
+- **MAM Cookies**: Keep MyAnonamouse session cookies secure; they're stored encrypted in the database
+
+### Monitoring
+- **Check Logs**: Monitor application logs for authentication failures or path traversal attempts
+- **Resource Usage**: HTTP sessions are now managed efficiently to prevent file descriptor exhaustion
+- **Test Suite**: Run `uv run pytest tests/test_security_fixes.py` after updates to verify security features
+
+For detailed security improvements, see `tasks.md` and `TEST_RESULTS.md`.
 
 # Tools
 
